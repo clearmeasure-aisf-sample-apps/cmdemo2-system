@@ -1,0 +1,42 @@
+@startuml 04-app-repository
+!include _c4.iuml
+title CM demo 2 multi-region | Phase 4: app repository pushed (2026-10-04)
+
+Boundary(box, "Operator machine omarchy") {
+  Container(aiops, "Linux user aiops", "gh as cm-ai-ops-bot", "Ran new-app-repository.ps1")
+}
+
+Boundary(upstream, "GitHub ClearMeasureLabs") {
+  Container(bootcamp, "bootcamp-palermo-workorders", "upstream, read only", "clearmeasure-aisf-sample-apps/cmdemo1-workorders@e1fde555360ebe2d62396d0ed79e7b71f80a0442")
+}
+
+Boundary(gh, "GitHub org clearmeasure-aisf-sample-apps") {
+  Container(apprepo, "cmdemo2-workorders", "public repository, master protected by ruleset (Build result)", "Snapshot without history; deploy.yml, .octopus/ and the publish jobs removed", $tags="new")
+  Container(wf_build, "Workflow Build", "GitHub Actions, build.yml", "Unit and integration tests, packages MAJOR.MINOR.<run>", $tags="new")
+  Container(wf_release, "Workflow Release", "GitHub Actions, release.yml, environment release", "After a green Build of master; no registry, no Azure credential", $tags="new")
+  Container(sysrepo, "cmdemo2-system", "system repository", "environments/tdd/versions.json")
+  Container(board, "Project board", "GitHub Project", "Both repositories linked")
+}
+
+Boundary(octo, "Octopus space cmdemo2 demo") {
+  Container(sa, "cmdemo2-github", "service account", "OIDC identity for cmdemo2-workorders, environment release (immutable subject)", $tags="new")
+  ContainerDb(feed, "Built-in feed", "Octopus packages", "cmdemo2-ui.<version>.zip: the published app")
+  Container(proj_app, "cmdemo2-ui", "project", "Pin version, Migrate database, Update deployable, Verify deployable")
+}
+
+Boundary(sub, "Subscription Jeffrey MVP Azure subscription 7-25--7-27") {
+  Container(app, "app-cmdemo2-tdd-ui", "App Service web app in stack-cmdemo2-tdd", "Default page")
+}
+
+Rel(aiops, bootcamp, "snapshot", "git clone --depth 1", $tags="new")
+Rel(aiops, apprepo, "creates, pushes master; variables, environment release", $tags="new")
+Rel(apprepo, wf_build, "push to master", $tags="new")
+Rel(wf_build, wf_release, "workflow_run: completed", $tags="new")
+Rel(wf_release, sa, "OctopusDeploy/login", "OIDC", $tags="planned")
+Rel(wf_release, feed, "push zip", $tags="planned")
+Rel(sa, proj_app, "release <version>", $tags="planned")
+Rel(proj_app, feed, "the release's zip", $tags="planned")
+Rel(proj_app, app, "zip deploy", $tags="planned")
+
+SHOW_LEGEND()
+@enduml
