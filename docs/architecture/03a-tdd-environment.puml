@@ -1,0 +1,44 @@
+@startuml 03a-tdd-environment
+!include _c4.iuml
+title CM demo 2 multi-region | Phase 3a: tdd environment from the pipeline (2026-10-04)
+
+Person(viewer, "Class audience", "Browser")
+
+Boundary(gh, "GitHub org clearmeasure-aisf-sample-apps") {
+  Container(sysrepo, "cmdemo2-system", "public repository", "system.json, infra/, octopus/; docs/architecture/")
+  Container(wf_system, "Workflow system", "GitHub Actions", "octopus-apply, then system-release (immutable OIDC subjects)")
+}
+
+Boundary(octo, "Octopus space cmdemo2 demo") {
+  Container(octo_cfg, "Environments, lifecycle cmdemo2-lifecycle", "Terraform octopus/", "tdd", $tags="new")
+  Container(octo_accounts, "Azure OIDC accounts", "azure-cmdemo2-nonprod, azure-cmdemo2-prod", "Subjects space/project/environment", $tags="new")
+  Container(octo_projects, "Projects cmdemo2-system, cmdemo2-ui", "Hosted Ubuntu workers, worker-tools container", "Apply environment, Grant database access, Verify environment; Pin, Migrate, Update, Verify", $tags="new")
+  Container(rel_sys, "cmdemo2-system 1.0.1", "release", "Deployed to tdd", $tags="new")
+}
+
+Boundary(rgn, "rg-cmdemo2-nonprod (westus3)") {
+  Container(id_dn, "id-cmdemo2-deploy-nonprod", "managed identity", "Owner of the group; the only principal the stack's deny settings exclude")
+  Boundary(stack, "Deployment stack stack-cmdemo2-tdd (deny write and delete)") {
+    ContainerDb(kv, "kvcmdemo2tddptgq3", "Key Vault", "sql-admin-password; ui-sql-password, ui-sql-connection-string", $tags="new")
+    ContainerDb(sql, "sql-cmdemo2-tdd-7ihwh / sqldb-cmdemo2-tdd", "Azure SQL, free offer, centralus", "Serverless; auto-pause; contained user ui", $tags="new")
+    Container(plan, "asp-cmdemo2-tdd", "App Service plan", "Free (F1), Linux; one for the tier", $tags="new")
+    Container(app, "app-cmdemo2-tdd-ui", "App Service web app, .NET 10", "Default page until the first app release; https://app-cmdemo2-tdd-ui.azurewebsites.net", $tags="new")
+    Container(id_login, "id-cmdemo2-tdd-ui", "managed identity", "The only reader of ui-sql-connection-string", $tags="new")
+  }
+}
+
+Rel(sysrepo, wf_system, "merge to main")
+Rel(wf_system, octo_cfg, "terraform apply", "OIDC", $tags="new")
+Rel(wf_system, rel_sys, "push package, create release", $tags="new")
+Rel(rel_sys, octo_accounts, "uses azure-cmdemo2-nonprod", $tags="new")
+Rel(octo_accounts, id_dn, "Octopus OIDC", $tags="new")
+Rel(id_dn, stack, "az stack group create", $tags="new")
+Rel(id_dn, sql, "Grant database access: user ui", $tags="new")
+Rel(app, plan, "runs on", $tags="new")
+Rel(app, id_login, "runs as", $tags="new")
+Rel(id_login, kv, "its own secret", $tags="new")
+Rel(app, sql, "SQL connection, own login", $tags="new")
+Rel(viewer, app, "HTTPS", $tags="new")
+
+SHOW_LEGEND()
+@enduml
