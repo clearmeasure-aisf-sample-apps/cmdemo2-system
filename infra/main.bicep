@@ -137,6 +137,13 @@ module vault 'modules/keyvault.bicep' = {
 // environment of a tier owns the tier's plan, the others in the tier run their web apps on it. App Service uses the
 // system's location (appLocation is a Container Apps quota matter).
 var planOwner = first(filter(system.environments, e => e.tier == environment.tier))!.name
+// environments[].standbyLocation: the App Service apps a second time, in that region (primary and standby behind the
+// environment's Front Door endpoint, capability "frontdoor"). The standby region's Free plan belongs to the first
+// environment of the tier that has this standby region.
+var standbyLocation = string(union({ standbyLocation: '' }, rawEnvironment).standbyLocation)
+var standbyPlanOwner = empty(standbyLocation)
+  ? environmentName
+  : first(filter(system.environments, e => e.tier == environment.tier && union({ standbyLocation: '' }, e).standbyLocation == standbyLocation))!.name
 
 module appService 'modules/appservice.bicep' = if (!empty(appServiceDeployables)) {
   name: 'appservice-${environmentName}'
@@ -146,6 +153,25 @@ module appService 'modules/appservice.bicep' = if (!empty(appServiceDeployables)
     location: location
     planName: 'asp-${slug}-${planOwner}'
     ownsPlan: planOwner == environmentName
+    tags: tags
+    deployables: appServiceDeployables
+    versions: versions
+    identityResourceIds: [for (d, i) in appServiceDeployables: loginIdentities[i].id]
+    connectionStringSecretUris: vault.outputs.loginConnectionStringUris
+    applicationInsightsConnectionString: contains(capabilities, 'telemetry') ? telemetry!.outputs.connectionString : ''
+  }
+}
+
+module appServiceStandby 'modules/appservice.bicep' = if (!empty(appServiceDeployables) && !empty(standbyLocation)) {
+  name: 'appservice-${environmentName}-standby'
+  params: {
+    slug: slug
+    environmentName: environmentName
+    location: standbyLocation
+    planName: 'asp-${slug}-${standbyPlanOwner}-${standbyLocation}'
+    ownsPlan: standbyPlanOwner == environmentName
+    nameSuffix: '-${standbyLocation}'
+    role: 'standby'
     tags: tags
     deployables: appServiceDeployables
     versions: versions
@@ -181,4 +207,7 @@ output sqlServerFqdn string = sqlServerFqdn
 output databaseName string = databaseName
 output sqlAdminLogin string = sqlAdminLogin
 output deployables array = concat(empty(containerDeployables) ? [] : apps!.outputs.deployables, empty(appServiceDeployables) ? [] : appService!.outputs.deployables)
+// The same App Service deployables in the standby region (empty without a standbyLocation): the scripts deploy to and
+// verify both, and the Front Door endpoint has both as origins.
+output standby array = (empty(appServiceDeployables) || empty(standbyLocation)) ? [] : appServiceStandby!.outputs.deployables
 output capabilities array = capabilities

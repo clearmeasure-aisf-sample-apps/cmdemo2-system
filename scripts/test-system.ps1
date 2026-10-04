@@ -75,6 +75,20 @@ foreach ($environment in $system.environments) {
         }
     }
 
+    # A standby region (the App Service apps a second time, behind the environment's Front Door endpoint) and the
+    # capability "frontdoor" (an endpoint in the system's profile, azure.frontDoor).
+    if ($environment.ContainsKey('standbyLocation')) {
+        $standby = [string] $environment.standbyLocation
+        $appServiceNames = @($system.deployables | Where-Object { $_['hosting'] -eq 'appservice' } | ForEach-Object { [string] $_.name })
+        Test-Rule "environment $name standby region" ($standby -cmatch '^[a-z0-9]+$' -and $standby -cne [string] $system.system.location -and $appServiceNames.Count -gt 0 -and @($environment.capabilities) -contains 'frontdoor') 'an Azure region other than system.location, with an App Service deployable and capability frontdoor (only the Front Door endpoint sends traffic to the standby)'
+        foreach ($deployableName in $appServiceNames) {
+            Test-Rule "environment $name standby app name length ($deployableName)" (("app-$slug-$name-$deployableName-$standby").Length -le 60) 'slug, environment, deployable and region too long for a web app name (60 characters)'
+        }
+    }
+    if (@($environment.capabilities) -contains 'frontdoor') {
+        Test-Rule "environment $name Front Door profile" ($system.azure.ContainsKey('frontDoor') -and $system.azure.frontDoor['profile'] -and $system.azure.frontDoor['resourceGroup']) 'capability frontdoor needs azure.frontDoor { resourceGroup, profile } (the seed creates the profile)'
+    }
+
     # Demo data, optional: user name -> middle name for the system step "Set employee middle names";
     # dbo.Employee.MiddleName holds at most 100 characters.
     if ($environment.ContainsKey('employeeMiddleNames')) {

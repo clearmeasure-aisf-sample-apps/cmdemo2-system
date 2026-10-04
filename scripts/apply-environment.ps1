@@ -297,58 +297,74 @@ function Stop-AvailabilityProbe {
 }
 
 $probe = Start-AvailabilityProbe -Group $resourceGroup -Environment $environmentName -Outputs $outputs
-try {
-    $result = $null
+function Invoke-StackApply {
+    # Applies a template as a deployment stack with deny settings; returns the stack as JSON.
     # New role assignments and identities take a few minutes to propagate, and Azure sometimes reports
     # DeploymentStackTenantRegistrationFailed on a stack with deny settings, and a runbook (restore test, password
     # rotation) may hold the database briefly (ConflictingDatabaseOperation): the apply is retried. An error the retry
     # recovers from is information, so az's stderr is kept and shown only when it is not a known transient one, or
     # when the last attempt fails (no broken windows: a healthy run logs no error).
+    param(
+        [Parameter(Mandatory)] [string] $Name,
+        [Parameter(Mandatory)] [string] $Group,
+        [Parameter(Mandatory)] [string] $TemplateFile,
+        [Parameter(Mandatory)] [string] $ParametersFile
+    )
     $transient = 'DeploymentStackTenantRegistrationFailed|PrincipalNotFound|InvalidAuthenticationToken|ConflictingDatabaseOperation'
     $errorFile = Join-Path ([IO.Path]::GetTempPath()) "stack-$([Guid]::NewGuid().ToString('N')).err"
-    for ($attempt = 1; $attempt -le 3; $attempt++) {
-        $PSNativeCommandUseErrorActionPreference = $false
-        $result = az stack group create `
-            --name $stackName `
-            --resource-group $resourceGroup `
-            --template-file $template `
-            --parameters "@$parametersFile" `
-            --action-on-unmanage deleteResources `
-            --deny-settings-mode denyWriteAndDelete `
-            --deny-settings-excluded-principals $deployPrincipalId `
-            --yes `
-            --output json 2>$errorFile
-        $applied = $LASTEXITCODE -eq 0
-        $PSNativeCommandUseErrorActionPreference = $true
-        $stderr = (Get-Content -LiteralPath $errorFile -Raw -ErrorAction SilentlyContinue) ?? ''
-        if ($applied) {
-            # A successful apply that still wrote something (a Bicep warning) is a finding: show it.
-            if ($stderr.Trim()) { Write-Warning $stderr.Trim() }
-            break
+    try {
+        for ($attempt = 1; $attempt -le 3; $attempt++) {
+            $PSNativeCommandUseErrorActionPreference = $false
+            $json = az stack group create `
+                --name $Name `
+                --resource-group $Group `
+                --template-file $TemplateFile `
+                --parameters "@$ParametersFile" `
+                --action-on-unmanage deleteResources `
+                --deny-settings-mode denyWriteAndDelete `
+                --deny-settings-excluded-principals $deployPrincipalId `
+                --yes `
+                --output json 2>$errorFile
+            $applied = $LASTEXITCODE -eq 0
+            $PSNativeCommandUseErrorActionPreference = $true
+            $stderr = (Get-Content -LiteralPath $errorFile -Raw -ErrorAction SilentlyContinue) ?? ''
+            if ($applied) {
+                # A successful apply that still wrote something (a Bicep warning) is a finding: show it.
+                if ($stderr.Trim()) { Write-Warning $stderr.Trim() }
+                return $json
+            }
+            if ($attempt -eq 3) {
+                Write-Host $stderr
+                Fail-Step "az stack group create failed three times for $Name; the error is above."
+            }
+            $code = [regex]::Match($stderr, $transient).Value
+            if ($code) {
+                Write-Host "Azure reported $code, a transient error (attempt $attempt of 3); retrying in 90 seconds."
+            }
+            else {
+                Write-Warning "az stack group create failed (attempt $attempt of 3); retrying in 90 seconds:`n$($stderr.Trim())"
+            }
+            Start-Sleep -Seconds 90
         }
-        if ($attempt -eq 3) {
-            Write-Host $stderr
-            Fail-Step "az stack group create failed three times for $stackName; the error is above."
-        }
-        $code = [regex]::Match($stderr, $transient).Value
-        if ($code) {
-            Write-Host "Azure reported $code, a transient error (attempt $attempt of 3); retrying in 90 seconds."
-        }
-        else {
-            Write-Warning "az stack group create failed (attempt $attempt of 3); retrying in 90 seconds:`n$($stderr.Trim())"
-        }
-        Start-Sleep -Seconds 90
     }
+    finally {
+        Remove-Item -LiteralPath $errorFile -Force -ErrorAction SilentlyContinue
+    }
+}
+
+try {
+    $result = Invoke-StackApply -Name $stackName -Group $resourceGroup -TemplateFile $template -ParametersFile $parametersFile
 }
 finally {
     Remove-Item -LiteralPath $parametersFile -Force -ErrorAction SilentlyContinue
-    Remove-Item -LiteralPath $errorFile -Force -ErrorAction SilentlyContinue
 }
 # App Service resolves Key Vault references when a site starts and caches them for up to a day. A site whose identity
 # the apply just replaced (a moved environment) may have tried before its new role on the secret took effect: check the
 # references, and force a new resolution while one is not resolved yet (up to five minutes).
 $applied = ($result | ConvertFrom-Json -AsHashtable).outputs
-foreach ($site in @($applied.deployables.value | Where-Object { $_['hosting'] -eq 'appservice' })) {
+# The same apps in the standby region (environments[].standbyLocation); empty without one.
+$standbySites = if ($applied.ContainsKey('standby')) { @($applied.standby.value) } else { @() }
+foreach ($site in @($applied.deployables.value | Where-Object { $_['hosting'] -eq 'appservice' }) + $standbySites) {
     $siteId = ([string] (az resource show --resource-group $resourceGroup --name ([string] $site.webApp) --resource-type Microsoft.Web/sites --query id --output tsv)).Trim()
     $deadline = (Get-Date).AddMinutes(5)
     while ($true) {
@@ -359,6 +375,59 @@ foreach ($site in @($applied.deployables.value | Where-Object { $_['hosting'] -e
         Write-Host "Key Vault references of $($site.webApp) not resolved yet ($($pending -join '; ')); refreshing in 30 seconds."
         Start-Sleep -Seconds 30
         az rest --method post --url "https://management.azure.com$siteId/config/configreferences/appsettings/refresh?api-version=2022-03-01" --output none
+    }
+}
+
+# Capability "frontdoor": the environment's public address, one Front Door endpoint per deployable in the system's
+# profile (system.json azure.frontDoor; the seed creates it in a resource group of its own, shared by both tiers). It is
+# a stack of its own in that group, stack-<slug>-<env>-edge, with the apps this stack reports as origins: the primary at
+# priority 1 and the standby at priority 2. Its deny settings exclude only this tier's deploy identity. Without the
+# capability, a stack left from before is removed with its endpoints.
+$frontDoor = if ($system.azure.ContainsKey('frontDoor')) { $system.azure.frontDoor } else { @{} }
+$edgeStackName = "$stackName-edge"
+$endpoints = @()
+if (@($applied.capabilities.value) -contains 'frontdoor') {
+    if (-not $frontDoor['profile']) {
+        Fail-Step "Environment $environmentName has capability frontdoor, but system.json has no azure.frontDoor: run the seed with azure.frontDoor in the demo file, and add its output to system.json."
+    }
+    $edgeDeployables = @(foreach ($deployable in @($applied.deployables.value)) {
+            $origins = @(@{ name = 'primary'; hostName = ([uri] [string] $deployable.url).Host; priority = 1 })
+            foreach ($site in @($standbySites | Where-Object { $_.name -eq $deployable.name })) {
+                $origins += @{ name = 'standby'; hostName = ([uri] [string] $site.url).Host; priority = 2 }
+            }
+            @{ name = [string] $deployable.name; origins = $origins }
+        })
+    $edgeParameters = @{
+        '$schema'      = 'https://schema.management.azure.com/schemas/2019-04-01/deploymentParameters.json#'
+        contentVersion = '1.0.0.0'
+        parameters     = @{
+            slug            = @{ value = $slug }
+            environmentName = @{ value = $environmentName }
+            profileName     = @{ value = [string] $frontDoor.profile }
+            tags            = @{ value = @{ system = $slug; environment = $environmentName; purpose = 'demo' } }
+            deployables     = @{ value = $edgeDeployables }
+        }
+    }
+    $edgeParametersFile = Join-Path ([IO.Path]::GetTempPath()) "stack-$([Guid]::NewGuid().ToString('N')).json"
+    $edgeParameters | ConvertTo-Json -Depth 20 | Set-Content -LiteralPath $edgeParametersFile -Encoding utf8NoBOM
+    try {
+        Write-Host "Front Door: stack $edgeStackName in $($frontDoor.resourceGroup), profile $($frontDoor.profile)"
+        $edgeResult = Invoke-StackApply -Name $edgeStackName -Group ([string] $frontDoor.resourceGroup) `
+            -TemplateFile (Join-Path $root 'infra' 'modules' 'frontdoor.bicep') -ParametersFile $edgeParametersFile
+    }
+    finally {
+        Remove-Item -LiteralPath $edgeParametersFile -Force -ErrorAction SilentlyContinue
+    }
+    $endpoints = @(($edgeResult | ConvertFrom-Json -AsHashtable).outputs.endpoints.value)
+}
+elseif ($frontDoor['resourceGroup']) {
+    $PSNativeCommandUseErrorActionPreference = $false
+    az stack group show --name $edgeStackName --resource-group ([string] $frontDoor.resourceGroup) --output none 2>$null
+    $hasEdgeStack = $LASTEXITCODE -eq 0
+    $PSNativeCommandUseErrorActionPreference = $true
+    if ($hasEdgeStack) {
+        az stack group delete --name $edgeStackName --resource-group ([string] $frontDoor.resourceGroup) --action-on-unmanage deleteResources --yes --output none
+        Write-Highlight "Front Door endpoints of $environmentName removed (capability frontdoor is off)."
     }
 }
 
@@ -374,5 +443,12 @@ foreach ($deployable in $stack.outputs.deployables.value) {
     $label = if ($deployable.version) { $deployable.version } else { 'placeholder' }
     Write-Highlight "$($deployable.name) in ${environmentName}: $($deployable.url) ($label)"
     Set-OctopusVariable -name "Url.$($deployable.name)" -value $deployable.url
+}
+foreach ($site in $standbySites) {
+    Write-Highlight "$($site.name) in ${environmentName}, standby in $($site.region): $($site.url)"
+}
+foreach ($endpoint in $endpoints) {
+    Write-Highlight "$($endpoint.name) in ${environmentName} behind Front Door: $($endpoint.url) ($(@($endpoint.origins).Count) origin(s), probe $($endpoint.probePath))"
+    Set-OctopusVariable -name "FrontDoorUrl.$($endpoint.name)" -value $endpoint.url
 }
 Write-Highlight "Capabilities of ${environmentName}: $($stack.outputs.capabilities.value -join ', ')"

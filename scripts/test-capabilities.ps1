@@ -135,9 +135,11 @@ function Get-Site([string] $Environment) {
     # The App Service web app of the first deployable, by the name the stack reports, with its plan's SKU.
     $entry = az stack group show --name "stack-$slug-$Environment" --resource-group (Get-Group $Environment) --query "outputs.deployables.value[?name=='$deployable'] | [0]" --output json | ConvertFrom-Json -AsHashtable
     if (-not $entry -or -not $entry['webApp']) { throw "stack-$slug-$Environment lists no web app for $deployable (a failed or unfinished apply?)" }
-    $site = az webapp show --name $entry.webApp --resource-group (Get-Group $Environment) --query '{name: name, location: location, plan: appServicePlanId}' --output json | ConvertFrom-Json -AsHashtable
+    # As plain resources: az webapp show also asks for the site's publishing profile, which a reader may not have and
+    # the stack's deny settings refuse.
+    $site = az resource show --name $entry.webApp --resource-group (Get-Group $Environment) --resource-type Microsoft.Web/sites --query '{name: name, location: location, plan: properties.serverFarmId}' --output json | ConvertFrom-Json -AsHashtable
     $site.url = [string] $entry.url
-    $site.sku = az appservice plan show --ids $site.plan --query '{name: sku.name, tier: sku.tier}' --output json | ConvertFrom-Json -AsHashtable
+    $site.sku = az resource show --ids $site.plan --query '{name: sku.name, tier: sku.tier}' --output json | ConvertFrom-Json -AsHashtable
     $site
 }
 function Get-DeployedPackage([string] $Environment) {
@@ -244,6 +246,8 @@ $checks = [ordered] @{
         Assert-That $rolledBack "no successful redeployment of an older release in $first"; "an older release was redeployed successfully in $first (test-rollback.ps1)"
     }
     'CAP-038' = {
+        # The sign-off step exists once an environment follows the first: a system with one environment promotes nothing.
+        if ($environments.Count -lt 2) { Skip-Check 'no environment after the first yet' }
         foreach ($slug in $systemProject, $deployableProject) { $s = @(Get-ProcessStep $slug)[0]; Assert-That ($s.Name -eq 'Sign-off' -and $s.Actions[0].ActionType -eq 'Octopus.Manual') "$slug does not start with Sign-off" }
         Assert-That ((Get-RepoFile $systemRepo 'octopus/projects.tf') -match 'octopusdeploy_project_deployment_freeze') 'no freeze support'; 'Sign-off first in both projects; freezes from system.json'
     }
@@ -294,6 +298,30 @@ $checks = [ordered] @{
         }
         "every environment's apps run where system.json places them"
     }
+    'CAP-046' = {
+        # One public address per environment with capability frontdoor: its Front Door endpoint answers, its stack is
+        # protected, and its origins are exactly the apps the environment's stack reports (primary and standby).
+        $on = @($system.environments | Where-Object { @($_.capabilities) -contains 'frontdoor' } | ForEach-Object { [string] $_.name })
+        if ($on.Count -eq 0) { Skip-Check 'no environment has capability frontdoor yet' }
+        $edge = [string] $system.azure.frontDoor.resourceGroup
+        $shown = foreach ($e in $on) {
+            $st = az stack group show --name "stack-$slug-$e-edge" --resource-group $edge --query '{p: provisioningState, d: denySettings.mode, endpoints: outputs.endpoints.value}' --output json | ConvertFrom-Json -AsHashtable
+            Assert-That ($st.p -eq 'succeeded' -and $st.d -eq 'denyWriteAndDelete') "$e edge stack $($st.p) $($st.d)"
+            $apps = az stack group show --name "stack-$slug-$e" --resource-group (Get-Group $e) --query '{primary: outputs.deployables.value, standby: outputs.standby.value}' --output json | ConvertFrom-Json -AsHashtable
+            # Before the first app release the app has no liveness path yet: the default page answers on /.
+            $path = if (Find-LastDeployment $deployableProject $e) { $null } else { '/' }
+            foreach ($endpoint in @($st.endpoints)) {
+                $want = @(@($apps.primary) + @($apps.standby) | Where-Object { $_ -and $_.name -eq $endpoint.name } | ForEach-Object { ([uri] [string] $_.url).Host } | Sort-Object)
+                $got = @(@($endpoint.origins) | ForEach-Object { [string] $_.hostName } | Sort-Object)
+                Assert-That (($want -join ',') -eq ($got -join ',')) "$e $($endpoint.name): origins $($got -join ', '), apps $($want -join ', ')"
+                $uri = "$($endpoint.url)$($path ?? [string] $endpoint.probePath)"
+                $status = [int] (Invoke-WebRequest -Uri $uri -TimeoutSec 120 -SkipHttpErrorCheck).StatusCode
+                Assert-That ($status -eq 200) "$uri answered $status"
+                "$e $($endpoint.url) ($($got.Count) origin(s))"
+            }
+        }
+        "one public address per environment: $($shown -join '; ')"
+    }
     'CAP-051' = {
         $ids = $system.azure.identities
         $expect = @(
@@ -311,21 +339,21 @@ $checks = [ordered] @{
     'CAP-060' = { $r = Get-RecentRun 'Restore test' 8; Assert-That ($r.Count -ge 1) 'no successful restore test in 8 days'; "restore test passed $($r[0].CompletedTime)" }
     'CAP-061' = { $prod = @(Get-ProdEnvironment)[0]; $d = Get-LastDeployment $deployableProject $prod; Assert-That ($d.Log -match 'Restore point before') "no restore point in the last $prod deployment"; "restore point recorded before $($d.Version) in $prod" }
     'CAP-070' = {
-        # Telemetry is proven where it comes from: the environment's OpenTelemetry agent sends to Application Insights,
-        # and requests recorded by that agent (SDK "otelc-...") arrived in the last 30 days.
+        # Telemetry is proven where it lands: in every environment with the capability, the app gets the Application
+        # Insights connection string, and requests under its own name (OTEL_SERVICE_NAME, <slug>-<deployable>) arrived
+        # in the last 30 days through the app's OpenTelemetry SDK (Azure Monitor exporter).
         $on = @($system.environments | Where-Object { @($_.capabilities) -contains 'telemetry' } | ForEach-Object { [string] $_.name })
         if ($on.Count -eq 0) { Skip-Check 'no environment has capability telemetry yet' }
-        if ($onAppService) { Skip-Check 'the OpenTelemetry agent is a Container Apps feature; the first app runs on App Service' }
+        $role = "$slug-$deployable"
         foreach ($e in $on) {
-            $managedEnvironment = [string] (Get-App $e).properties.environmentId
-            $otel = (az rest --method get --url "https://management.azure.com${managedEnvironment}?api-version=2024-10-02-preview" --output json | ConvertFrom-Json -AsHashtable).properties.openTelemetryConfiguration
-            Assert-That ($otel -and @($otel.tracesConfiguration.destinations) -contains 'appInsights') "no OpenTelemetry agent to Application Insights in $e"
+            $variables = @((Get-App $e).properties.template.containers[0].env | ForEach-Object { [string] $_.name })
+            Assert-That ($variables -contains 'APPLICATIONINSIGHTS_CONNECTION_STRING') "the app in $e has no APPLICATIONINSIGHTS_CONNECTION_STRING"
             $component = "/subscriptions/$($system.azure.subscriptionId)/resourceGroups/$(Get-Group $e)/providers/Microsoft.Insights/components/appi-$slug-$e"
-            $body = @{ query = "requests | where sdkVersion startswith 'otelc' | summarize count()"; timespan = 'P30D' } | ConvertTo-Json -Compress
+            $body = @{ query = "requests | where cloud_RoleName == '$role' | summarize count()"; timespan = 'P30D' } | ConvertTo-Json -Compress
             $count = [int] (az rest --method post --url "https://management.azure.com$component/query?api-version=2018-04-20" --body $body --query 'tables[0].rows[0][0]' --output tsv)
-            Assert-That ($count -gt 0) "no OpenTelemetry requests in appi-$slug-$e in 30 days"
+            Assert-That ($count -gt 0) "no requests of $role in appi-$slug-$e in 30 days"
         }
-        "OpenTelemetry agent to Application Insights in $($on -join ', '), requests arriving"
+        "requests of $role arriving in Application Insights in $($on -join ', ')"
     }
     'CAP-071' = { $noisy = @(Get-NoisyDeployment); Assert-That ($noisy.Count -eq 0) "warnings in: $($noisy -join '; ')"; 'the logs of every current deployment are clean' }
     'CAP-080' = { $files = @(gh api "repos/$systemRepo/contents/docs/architecture" --jq '.[].name'); $missing = @($files | Where-Object { $_ -like '*.puml' -and $files -notcontains ($_ -replace '\.puml$', '.png') }); Assert-That ($missing.Count -eq 0 -and $files.Count -gt 0) "not rendered: $missing"; "$(@($files | Where-Object { $_ -like '*.png' }).Count) diagrams rendered" }
