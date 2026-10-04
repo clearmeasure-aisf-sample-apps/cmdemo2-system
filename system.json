@@ -1,0 +1,110 @@
+{
+  "system": {
+    "slug": "cmdemo2",
+    "name": "CM demo 2 multi-region",
+    "location": "westus3",
+    "githubOrg": "clearmeasure-aisf-sample-apps",
+    "repository": "cmdemo2-system",
+    "sqlLocation": "centralus"
+  },
+  "azure": {
+    "tenantId": "40645332-2e20-4bca-882c-b2706f93ce44",
+    "subscriptionId": "4a4dfa6d-d434-4b9e-8a88-63bbf61cfb69",
+    "resourceGroups": {
+      "nonprod": "rg-cmdemo2-nonprod",
+      "prod": "rg-cmdemo2-prod"
+    },
+    "registry": {
+      "loginServer": "acrcmdemo26hulrk.azurecr.io",
+      "name": "acrcmdemo26hulrk"
+    },
+    "terraformState": {
+      "container": "tfstate",
+      "resourceGroup": "rg-cmdemo2-nonprod",
+      "storageAccount": "stcmdemo2tf6hulrk"
+    },
+    "identities": {
+      "acrPush": {
+        "clientId": "91a1d08b-1180-4299-beaa-7c3aee88d1dc",
+        "name": "id-cmdemo2-acr-push",
+        "principalId": "c0d06fa5-7fb5-4a00-a45a-23f8e35f5cbf"
+      },
+      "apps": [
+        {
+          "clientId": "575adcae-a51f-476c-a323-4f4707b42b07",
+          "environment": "tdd",
+          "name": "id-cmdemo2-tdd-app",
+          "principalId": "19266038-7ee2-4ae9-b2f8-9b6fbdba4eb7",
+          "resourceId": "/subscriptions/4a4dfa6d-d434-4b9e-8a88-63bbf61cfb69/resourceGroups/rg-cmdemo2-nonprod/providers/Microsoft.ManagedIdentity/userAssignedIdentities/id-cmdemo2-tdd-app"
+        },
+        {
+          "clientId": "480acb73-e453-4ff5-a413-419b1b1a75a3",
+          "environment": "uat",
+          "name": "id-cmdemo2-uat-app",
+          "principalId": "fc0c1257-be14-4947-9227-8cfb15426152",
+          "resourceId": "/subscriptions/4a4dfa6d-d434-4b9e-8a88-63bbf61cfb69/resourceGroups/rg-cmdemo2-nonprod/providers/Microsoft.ManagedIdentity/userAssignedIdentities/id-cmdemo2-uat-app"
+        },
+        {
+          "clientId": "e5bd1bc7-52c1-4ca3-93a9-502284f35282",
+          "environment": "prod",
+          "name": "id-cmdemo2-prod-app",
+          "principalId": "f8ffc760-e343-472b-9b3e-c04574f4f1d2",
+          "resourceId": "/subscriptions/4a4dfa6d-d434-4b9e-8a88-63bbf61cfb69/resourceGroups/rg-cmdemo2-prod/providers/Microsoft.ManagedIdentity/userAssignedIdentities/id-cmdemo2-prod-app"
+        }
+      ],
+      "deploy": {
+        "nonprod": {
+          "clientId": "31e1922c-c537-49eb-ad6e-529561d966e3",
+          "name": "id-cmdemo2-deploy-nonprod",
+          "principalId": "2c1436cf-cc14-4ef9-b9f1-ac43ffe7185b"
+        },
+        "prod": {
+          "clientId": "bd137923-81a3-4783-aded-db1ff2029fc1",
+          "name": "id-cmdemo2-deploy-prod",
+          "principalId": "326354db-2d2b-4f06-bbbe-d7468e74f6b7"
+        }
+      },
+      "octopusConfig": {
+        "clientId": "75a27072-9875-4932-8500-f89d1d34c06f",
+        "name": "id-cmdemo2-octopus-config",
+        "principalId": "e71b95ec-d588-4c31-8464-d5c504da9a5c"
+      },
+      "plan": {
+        "clientId": "ae2f809f-507f-4cbc-b7e0-f9d0fe8f1e9a",
+        "name": "id-cmdemo2-plan",
+        "principalId": "d72a6e3a-5040-4595-a6d4-9af639ea1e86"
+      }
+    }
+  },
+  "octopus": {
+    "url": "https://clearmeasure.octopus.app",
+    "spaceId": "Spaces-356",
+    "spaceSlug": "cmdemo2-demo",
+    "serviceAccountId": "36f21e86-981d-42b6-90a6-7823b83ad954"
+  },
+  "deployables": [
+    {
+      "name": "ui",
+      "repository": "cmdemo2-workorders",
+      "hosting": "appservice",
+      "startupAssembly": "ClearMeasure.Bootcamp.UI.Server.dll",
+      "port": 8080,
+      "healthPath": "/_healthcheck",
+      "databasePackage": "ChurchBulletin.Database",
+      "databaseAssembly": "ClearMeasure.Bootcamp.Database.dll",
+      "acceptanceTestsPackage": "ChurchBulletin.AcceptanceTests",
+      "acceptanceTestsAssembly": "ClearMeasure.Bootcamp.AcceptanceTests.dll",
+      "dataLoaderAssembly": "ClearMeasure.Bootcamp.IntegrationTests.dll"
+    }
+  ],
+  "environments": [
+    {
+      "name": "tdd",
+      "tier": "nonprod",
+      "capabilities": [
+        "baseline"
+      ],
+      "acceptanceTests": true
+    }
+  ]
+}
