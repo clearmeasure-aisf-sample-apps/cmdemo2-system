@@ -35,6 +35,10 @@ $deadlineMinutes = 10
 
 $stack = az stack group show --name "stack-$slug-$environmentName" --resource-group $resourceGroup --output json | ConvertFrom-Json -AsHashtable
 $deployables = @($stack.outputs.deployables.value | Where-Object { -not $only -or $_.name -eq $only })
+# The same apps in the standby region (environments[].standbyLocation) are verified like the primary ones.
+if ($stack.outputs.ContainsKey('standby')) {
+    $deployables += @($stack.outputs.standby.value | Where-Object { -not $only -or $_.name -eq $only })
+}
 if ($deployables.Count -eq 0) {
     Fail-Step "Stack stack-$slug-$environmentName lists no deployable$(if ($only) { " named $only" })."
 }
@@ -132,7 +136,7 @@ foreach ($deployable in $deployables) {
         Start-Sleep -Seconds 15
     }
     if ($status -eq 200) {
-        Write-Highlight "PASS $($deployable.name) in ${environmentName}: $uri"
+        Write-Highlight "PASS $($deployable.name) in ${environmentName}$(if ($deployable['role'] -eq 'standby') { " (standby, $($deployable.region))" }): $uri"
     }
     elseif ($status -eq -1) {
         $failed++
@@ -141,6 +145,38 @@ foreach ($deployable in $deployables) {
         Write-Warning "FAIL $($deployable.name) in ${environmentName}: $uri did not answer 200 within $deadlineMinutes minutes (last $status)"
         if ($deployable['hosting'] -ne 'appservice') { Write-RevisionLog -App $app }
         $failed++
+    }
+}
+
+# Capability "frontdoor": the environment's public address answers too. The endpoints are in stack-<slug>-<env>-edge
+# in the Front Door profile's resource group (variable Azure.EdgeResourceGroup, empty without a profile). A new endpoint
+# or route takes Front Door several minutes to reach every edge location, so this waits longer than for an app.
+$edgeGroup = [string] $OctopusParameters['Azure.EdgeResourceGroup']
+if ($edgeGroup) {
+    $PSNativeCommandUseErrorActionPreference = $false
+    $edgeJson = az stack group show --name "stack-$slug-$environmentName-edge" --resource-group $edgeGroup --output json 2>$null
+    $hasEdge = $LASTEXITCODE -eq 0
+    $PSNativeCommandUseErrorActionPreference = $true
+    $endpoints = if ($hasEdge) { @(($edgeJson | ConvertFrom-Json -AsHashtable).outputs.endpoints.value | Where-Object { -not $only -or $_.name -eq $only }) } else { @() }
+    foreach ($endpoint in $endpoints) {
+        $deployable = @($stack.outputs.deployables.value | Where-Object { $_.name -eq $endpoint.name })[0]
+        $path = if ($only -and $healthPath) { $healthPath } else { [string] $deployable.healthPath }
+        $uri = "$(([string] $endpoint.url).TrimEnd('/'))$path"
+        $deadline = (Get-Date).AddMinutes(30)
+        $status = 0
+        while ((Get-Date) -lt $deadline) {
+            try { $status = [int] (Invoke-WebRequest -Uri $uri -Method Get -TimeoutSec 60 -SkipHttpErrorCheck).StatusCode } catch { $status = 0 }
+            if ($status -eq 200) { break }
+            Write-Host "$uri answered $status; retrying"
+            Start-Sleep -Seconds 30
+        }
+        if ($status -eq 200) {
+            Write-Highlight "PASS $($endpoint.name) in ${environmentName} behind Front Door: $uri"
+        }
+        else {
+            Write-Warning "FAIL $($endpoint.name) in ${environmentName}: the Front Door endpoint $uri did not answer 200 within 30 minutes (last $status)"
+            $failed++
+        }
     }
 }
 

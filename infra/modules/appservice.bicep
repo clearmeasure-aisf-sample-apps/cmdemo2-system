@@ -6,6 +6,9 @@
 // databasePackage, whose login may also change the schema).
 // Free tier limits: 60 CPU minutes a day, no Always On (the first request after idle starts the app), 165 MB outbound a
 // day, no deployment slots.
+// An environment with a standbyLocation gets this module twice: the same apps in a second region (role "standby", names
+// with the region), on a Free plan of that region; Azure allows one Free Linux plan per resource group and region. Both
+// use the same identity and the same database.
 targetScope = 'resourceGroup'
 
 param slug string
@@ -14,14 +17,20 @@ param location string
 param tags object
 param deployables array
 param versions object
-@description('Name of the tier\'s Free plan: asp-<slug>-<first environment of the tier>.')
+@description('Name of the tier\'s Free plan in this region: asp-<slug>-<first environment of the tier>, with the region for a standby.')
 param planName string
+@description('Suffix of the web app names: empty in the primary region, -<region> in the standby (environments[].standbyLocation).')
+param nameSuffix string = ''
+@description('primary, or standby: the same apps in a second region, behind the environment\'s Front Door endpoint at priority 2.')
+param role string = 'primary'
 @description('True in the first environment of the tier, which creates the plan; the others use it.')
 param ownsPlan bool
 @description('User-assigned identity of each deployable, in the order of deployables.')
 param identityResourceIds array
 @description('Versionless Key Vault URI of each deployable\'s connection string, in the order of deployables.')
 param connectionStringSecretUris array
+@description('Application Insights connection string when the environment has capability "telemetry": the app exports to it with the Azure Monitor OpenTelemetry exporter.')
+param applicationInsightsConnectionString string = ''
 
 resource plan 'Microsoft.Web/serverfarms@2024-04-01' = if (ownsPlan) {
   name: planName
@@ -39,7 +48,7 @@ resource plan 'Microsoft.Web/serverfarms@2024-04-01' = if (ownsPlan) {
 
 resource sites 'Microsoft.Web/sites@2024-04-01' = [
   for (d, i) in deployables: {
-    name: 'app-${slug}-${environmentName}-${d.name}'
+    name: 'app-${slug}-${environmentName}-${d.name}${nameSuffix}'
     location: location
     tags: union(tags, { deployable: d.name })
     kind: 'app,linux'
@@ -65,12 +74,26 @@ resource sites 'Microsoft.Web/sites@2024-04-01' = [
         ftpsState: 'Disabled'
         minTlsVersion: '1.2'
         http20Enabled: true
-        appSettings: [
-          {
-            name: 'ConnectionStrings__SqlConnectionString'
-            value: '@Microsoft.KeyVault(SecretUri=${connectionStringSecretUris[i]})'
-          }
-        ]
+        appSettings: concat(
+          [
+            {
+              name: 'ConnectionStrings__SqlConnectionString'
+              value: '@Microsoft.KeyVault(SecretUri=${connectionStringSecretUris[i]})'
+            }
+            {
+              name: 'OTEL_SERVICE_NAME'
+              value: '${slug}-${d.name}'
+            }
+          ],
+          empty(applicationInsightsConnectionString)
+            ? []
+            : [
+                {
+                  name: 'APPLICATIONINSIGHTS_CONNECTION_STRING'
+                  value: applicationInsightsConnectionString
+                }
+              ]
+        )
       }
     }
   }
@@ -81,6 +104,8 @@ output deployables array = [
     name: d.name
     hosting: 'appservice'
     ownsDatabase: contains(d, 'databasePackage')
+    region: location
+    role: role
     webApp: sites[i].name
     startupCommand: 'dotnet ${d.startupAssembly}'
     url: 'https://${sites[i].properties.defaultHostName}'
