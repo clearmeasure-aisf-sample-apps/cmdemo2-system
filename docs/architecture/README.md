@@ -39,3 +39,9 @@ Source: [03a-tdd-environment.puml](03a-tdd-environment.puml)
 ![Phase 4: app repository pushed (2026-10-04)](04-app-repository.png)
 
 Source: [04-app-repository.puml](04-app-repository.puml)
+
+## Public address: Front Door in front of tdd (2026-10-04)
+
+![Public address: Front Door in front of tdd (2026-10-04)](12-public-address.png)
+
+Source: [12-public-address.puml](12-public-address.puml)
