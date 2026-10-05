@@ -127,7 +127,7 @@ function Get-Group([string] $Environment) {
 }
 function Get-App([string] $Environment) {
     # By the name the stack reports: a shared or moved Container Apps environment gives the app a suffix.
-    $name = ([string] (az stack group show --name "stack-$slug-$Environment" --resource-group (Get-Group $Environment) --query "outputs.deployables.value[?name=='$deployable'].containerApp | [0]" --output tsv)).Trim()
+    $name = "$(az stack group show --name "stack-$slug-$Environment" --resource-group (Get-Group $Environment) --query "outputs.deployables.value[?name=='$deployable'].containerApp | [0]" --output tsv)".Trim()
     if (-not $name) { throw "stack-$slug-$Environment lists no container app for $deployable (a failed or unfinished apply?)" }
     az containerapp show --name $name --resource-group (Get-Group $Environment) --output json | ConvertFrom-Json -AsHashtable
 }
@@ -151,7 +151,8 @@ function Get-DeployedPackage([string] $Environment) {
 }
 function Get-StandbyPlan([string] $Environment) {
     # The plan size of the first deployable's standby app, or $null without a standby region.
-    $webApp = ([string] (az stack group show --name "stack-$slug-$Environment" --resource-group (Get-Group $Environment) --query "outputs.standby.value[?name=='$deployable'].webApp | [0]" --output tsv)).Trim()
+    # "$(...)", not [string] (...): a command that prints nothing (no standby here) casts to $null, and .Trim() then throws.
+    $webApp = "$(az stack group show --name "stack-$slug-$Environment" --resource-group (Get-Group $Environment) --query "outputs.standby.value[?name=='$deployable'].webApp | [0]" --output tsv)".Trim()
     if (-not $webApp) { return $null }
     $plan = ([string] (az resource show --name $webApp --resource-group (Get-Group $Environment) --resource-type Microsoft.Web/sites --query properties.serverFarmId --output tsv)).Trim()
     ([string] (az resource show --ids $plan --query sku.name --output tsv)).Trim()
@@ -447,7 +448,7 @@ $checks = [ordered] @{
             })
         $shown = foreach ($e in $environments) {
             if (-not (Find-LastDeployment "$slug-$dashboardName" $e)) { continue }
-            $url = ([string] (az stack group show --name "stack-$slug-$e" --resource-group (Get-Group $e) --query "outputs.deployables.value[?name=='$dashboardName'].url | [0]" --output tsv)).Trim()
+            $url = "$(az stack group show --name "stack-$slug-$e" --resource-group (Get-Group $e) --query "outputs.deployables.value[?name=='$dashboardName'].url | [0]" --output tsv)".Trim()
             Assert-That ([bool] $url) "stack-$slug-$e lists no site for $dashboardName (a failed or unfinished apply?)"
             $content = (Invoke-WebRequest -Uri "$url/topology.json" -TimeoutSec 120).Content
             $topology = $(if ($content -is [byte[]]) { [Text.Encoding]::UTF8.GetString($content) } else { [string] $content }) | ConvertFrom-Json -AsHashtable
