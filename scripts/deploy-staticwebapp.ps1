@@ -621,23 +621,38 @@ if (-not (Get-Command java -ErrorAction SilentlyContinue)) {
     Fail-Step "The worker container has no java, which renders the dashboard's runtime diagrams with PlantUML ${plantUmlVersion}: use a worker-tools image with a Java runtime (octopus/main.tf, worker_tools_image)."
 }
 $javaVersion = "$(@(java -version 2>&1)[0])".Trim()
-# PlantUML measures text with the fonts Java finds through fontconfig. A worker container without any font (the first
-# deployment of the runtime view on cmdemo2 stopped there) gets a minimal set before the render: fontconfig and DejaVu,
-# from the container's own package source. The step runs as root in the worker-tools container.
-# @() around the if: an if statement hands on an empty list as nothing at all, whose .Count fails under strict mode.
+# PlantUML measures text through Java's font manager, which needs a font and three native libraries. The worker image
+# installs Java with --no-install-recommends, and on Ubuntu 24.04 openjdk-21-jre-headless only recommends them:
+# libharfbuzz0b, libfreetype6, libfontconfig1 (cmdemo2's first runtime view stopped at "libharfbuzz.so.0: cannot open
+# shared object file"). What is missing is installed from the container's own package source before the render; the
+# step runs as root in the worker-tools container.
+# @() around each if: an if statement hands on an empty list as nothing at all, whose .Count fails under strict mode.
 $fonts = @(if (Get-Command fc-list -ErrorAction SilentlyContinue) { fc-list 2>$null | Where-Object { $_ } })
-if ($fonts.Count -eq 0) {
+$libraries = @(if (Get-Command ldconfig -ErrorAction SilentlyContinue) { ldconfig -p 2>$null | Where-Object { $_ } })
+$needed = [ordered] @{
+    'libharfbuzz0b'     = 'libharfbuzz\.so\.0'
+    'libfreetype6'      = 'libfreetype\.so\.6'
+    'libfontconfig1'    = 'libfontconfig\.so\.1'
+    'fontconfig'        = ''
+    'fonts-dejavu-core' = ''
+}
+$missing = @(foreach ($package in $needed.Keys) {
+        $library = $needed[$package]
+        if ($library) { if (-not @($libraries | Where-Object { $_ -match $library }).Count) { $package } }
+        elseif ($fonts.Count -eq 0) { $package }
+    })
+if ($missing.Count -gt 0) {
     $clock = [Diagnostics.Stopwatch]::StartNew()
     $env:DEBIAN_FRONTEND = 'noninteractive'
     $PSNativeCommandUseErrorActionPreference = $false
-    $aptOutput = @(apt-get update -qq 2>&1) + @(apt-get install -y -qq --no-install-recommends fontconfig fonts-dejavu-core 2>&1)
+    $aptOutput = @(apt-get update -qq 2>&1) + @(apt-get install -y -qq --no-install-recommends @missing 2>&1)
     $aptCode = $LASTEXITCODE
     $PSNativeCommandUseErrorActionPreference = $true
     $aptOutput | Where-Object { "$_".Trim() } | ForEach-Object { Write-Host "  apt: $_" }
     if ($aptCode -ne 0) {
-        Fail-Step "The worker container has no fonts, which PlantUML needs to render the runtime diagrams, and installing fontconfig and fonts-dejavu-core failed (exit code $aptCode); its output is above."
+        Fail-Step "Java needs $($missing -join ', ') to render the runtime diagrams with PlantUML, and installing them failed (exit code $aptCode); its output is above."
     }
-    Write-Host ('Fonts for PlantUML installed in {0:0.0} s (fontconfig, DejaVu): the worker container had none.' -f $clock.Elapsed.TotalSeconds)
+    Write-Host ('Installed for PlantUML in {0:0.0} s: {1} (the worker container lacked them).' -f $clock.Elapsed.TotalSeconds, ($missing -join ', '))
 }
 $tools = Join-Path ([IO.Path]::GetTempPath()) "plantuml-$([Guid]::NewGuid().ToString('N'))"
 New-Item -ItemType Directory -Path $tools | Out-Null
