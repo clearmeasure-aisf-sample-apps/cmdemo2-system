@@ -38,7 +38,7 @@ $edgeGroup = [string] $OctopusParameters['Azure.EdgeResourceGroup']
 $limitMinutes = 10
 
 $outputs = (az stack group show --name "stack-$slug-$environmentName" --resource-group $resourceGroup --output json | ConvertFrom-Json -AsHashtable).outputs
-$standbySites = if ($outputs.ContainsKey('standby')) { @($outputs.standby.value) } else { @() }
+$standbySites = @(if ($outputs.ContainsKey('standby')) { $outputs.standby.value })
 $standby = $standbySites | Select-Object -First 1
 if (-not $standby) {
     Write-Highlight "No standby region in ${environmentName}: nothing to fail over."
