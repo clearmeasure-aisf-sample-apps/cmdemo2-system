@@ -18,21 +18,12 @@
       "nonprod": "rg-cmdemo2-nonprod",
       "prod": "rg-cmdemo2-prod"
     },
-    "registry": {
-      "loginServer": "acrcmdemo26hulrk.azurecr.io",
-      "name": "acrcmdemo26hulrk"
-    },
     "terraformState": {
       "container": "tfstate",
       "resourceGroup": "rg-cmdemo2-nonprod",
       "storageAccount": "stcmdemo2tf6hulrk"
     },
     "identities": {
-      "acrPush": {
-        "clientId": "91a1d08b-1180-4299-beaa-7c3aee88d1dc",
-        "name": "id-cmdemo2-acr-push",
-        "principalId": "c0d06fa5-7fb5-4a00-a45a-23f8e35f5cbf"
-      },
       "apps": [
         {
           "clientId": "575adcae-a51f-476c-a323-4f4707b42b07",
