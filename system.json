@@ -94,7 +94,9 @@
       "databaseAssembly": "ClearMeasure.Bootcamp.Database.dll",
       "acceptanceTestsPackage": "ChurchBulletin.AcceptanceTests",
       "acceptanceTestsAssembly": "ClearMeasure.Bootcamp.AcceptanceTests.dll",
-      "dataLoaderAssembly": "ClearMeasure.Bootcamp.IntegrationTests.dll"
+      "dataLoaderAssembly": "ClearMeasure.Bootcamp.IntegrationTests.dll",
+      "acceptanceTestsFilter": "FullyQualifiedName~WarmUpTests|FullyQualifiedName~LandingPageTests|FullyQualifiedName~LogoutTests|FullyQualifiedName~WorkOrderSaveDraftTests|FullyQualifiedName~WorkOrderAssignTests|FullyQualifiedName~WorkOrderBeginTests|FullyQualifiedName~WorkOrderCompleteTests|FullyQualifiedName~WorkOrderCancelTests|FullyQualifiedName~WorkOrderShelvedTests",
+      "acceptanceTestsWorkers": 2
     }
   ],
   "environments": [
