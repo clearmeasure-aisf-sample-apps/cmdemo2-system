@@ -16,9 +16,9 @@ Source: [00-operator-identity.puml](00-operator-identity.puml)
 
 Source: [01-octopus-foothold.puml](01-octopus-foothold.puml)
 
-## Phase 2: Azure seed (2026-10-04)
+## Phase 2: Azure seed (2026-10-05)
 
-![Phase 2: Azure seed (2026-10-04)](02-azure-seed.png)
+![Phase 2: Azure seed (2026-10-05)](02-azure-seed.png)
 
 Source: [02-azure-seed.puml](02-azure-seed.puml)
 
