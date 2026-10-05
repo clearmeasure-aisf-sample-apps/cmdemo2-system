@@ -373,12 +373,19 @@ $checks = [ordered] @{
     }
     'CAP-051' = {
         $ids = $system.azure.identities
+        # The push identity exists only with a registry (system.json azure.registry): a system whose apps are zips in
+        # the Octopus feed has neither.
+        $hasRegistry = $system.azure.ContainsKey('registry') -and $system.azure.registry['name']
         $expect = @(
-            @{ id = $ids.plan.principalId; role = 'Reader'; group = $system.azure.resourceGroups.nonprod },
-            @{ id = $ids.acrPush.principalId; role = 'AcrPush'; group = $system.azure.resourceGroups.nonprod },
-            @{ id = $ids.deploy.nonprod.principalId; role = 'Owner'; group = $system.azure.resourceGroups.nonprod },
+            @{ id = $ids.plan.principalId; role = 'Reader'; group = $system.azure.resourceGroups.nonprod }
+            if ($hasRegistry) { @{ id = $ids.acrPush.principalId; role = 'AcrPush'; group = $system.azure.resourceGroups.nonprod } }
+            @{ id = $ids.deploy.nonprod.principalId; role = 'Owner'; group = $system.azure.resourceGroups.nonprod }
             @{ id = $ids.deploy.prod.principalId; role = 'Owner'; group = $system.azure.resourceGroups.prod })
         foreach ($x in $expect) { $roles = @(Get-RoleName -Group $x.group -PrincipalId $x.id); Assert-That ($roles -contains $x.role -and $roles -notcontains 'Contributor') "$($x.id): $($roles -join ', ')" }
+        if (-not $hasRegistry) {
+            Assert-That (-not $ids.ContainsKey('acrPush')) 'azure.identities.acrPush without azure.registry'
+            return 'plan Reader, deploy Owner of its group only; no registry, so no push identity'
+        }
         'plan Reader, push AcrPush, deploy Owner of its group only'
     }
     'CAP-052' = { $prod = @(Get-ProdEnvironment); Assert-That ($prod.Count -ge 1) 'no prod-tier environment'; "$($prod -join ', ') in $($system.azure.resourceGroups.prod) with id-$($slug)-deploy-prod" }
@@ -395,8 +402,12 @@ $checks = [ordered] @{
         if ($on.Count -eq 0) { Skip-Check 'no environment has capability telemetry yet' }
         $role = "$slug-$deployable"
         foreach ($e in $on) {
-            $variables = @((Get-App $e).properties.template.containers[0].env | ForEach-Object { [string] $_.name })
-            Assert-That ($variables -contains 'APPLICATIONINSIGHTS_CONNECTION_STRING') "the app in $e has no APPLICATIONINSIGHTS_CONNECTION_STRING"
+            # A container app's settings are readable; a web app's are not (listing them is an action the reader lacks
+            # and the stack denies), so on App Service the arriving requests below are the proof.
+            if (-not $onAppService) {
+                $variables = @((Get-App $e).properties.template.containers[0].env | ForEach-Object { [string] $_.name })
+                Assert-That ($variables -contains 'APPLICATIONINSIGHTS_CONNECTION_STRING') "the app in $e has no APPLICATIONINSIGHTS_CONNECTION_STRING"
+            }
             $component = "/subscriptions/$($system.azure.subscriptionId)/resourceGroups/$(Get-Group $e)/providers/Microsoft.Insights/components/appi-$slug-$e"
             $body = @{ query = "requests | where cloud_RoleName == '$role' | summarize count()"; timespan = 'P30D' } | ConvertTo-Json -Compress
             $count = [int] (az rest --method post --url "https://management.azure.com$component/query?api-version=2018-04-20" --body $body --query 'tables[0].rows[0][0]' --output tsv)

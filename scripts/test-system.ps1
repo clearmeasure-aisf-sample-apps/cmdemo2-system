@@ -12,6 +12,8 @@
 
     - The slug, environment and deployable names follow the naming rules every template relies on.
     - Each deployable's hosting is one the templates know: containerapp (the default), appservice or staticwebapp.
+    - With a container app among the deployables, azure.registry names the system's registry (the seed creates one
+      only for a system that needs it).
     - Each environment has a tier (nonprod or prod), a runtime identity from the seed and a folder
       environments/<env>/ with a versions.json object whose keys are deployables.
     - Each capability has a module: baseline is built in, every other one is infra/modules/<capability>.bicep.
@@ -91,6 +93,11 @@ foreach ($deployable in @($system.deployables)) {
     if ($deployable.ContainsKey('hosting')) {
         Test-Rule "deployable $($deployable.name) hosting" ($hostings -ccontains [string] $deployable.hosting) "'$($deployable.hosting)' is not one of $($hostings -join ', ') (containerapp when left out)"
     }
+}
+# A container app's image comes from the system's registry (azure.registry { name, loginServer }, from the seed). A
+# system whose deployables all run on App Service or Static Web Apps has no registry, and no azure.registry.
+if (@($system.deployables | Where-Object { -not $_.ContainsKey('hosting') -or $_.hosting -ceq 'containerapp' }).Count -gt 0) {
+    Test-Rule 'azure.registry' ($system.azure.ContainsKey('registry') -and $system.azure.registry -is [Collections.IDictionary] -and $system.azure.registry['name'] -and $system.azure.registry['loginServer']) 'a container app needs azure.registry { name, loginServer }: the seed creates the registry for a system with a container app (new-demo-seed.ps1)'
 }
 # A static site is the dashboard of the system's apps: the first deployable is the app the checks and the operator
 # scripts ask, so it is never the static site.
