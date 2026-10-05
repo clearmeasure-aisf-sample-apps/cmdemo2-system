@@ -7,7 +7,8 @@
     "repository": "cmdemo2-system",
     "sqlLocation": "centralus",
     "planSku": {
-      "nonprod": "B1"
+      "nonprod": "B1",
+      "prod": "B1"
     }
   },
   "azure": {
