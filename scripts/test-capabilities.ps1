@@ -149,6 +149,14 @@ function Get-DeployedPackage([string] $Environment) {
     $package = @($release.SelectedPackages | Where-Object { $_.ActionName -eq 'Update deployable' })[0]
     @{ release = [string] $release.Version; package = [string] $package.Version }
 }
+function Get-DeclaredPlan([string] $Environment) {
+    # The plan size system.json declares for the environment's tier: system.planSku, F1 without it, and F1 for every
+    # tier while the system is dormant (azure.frontDoor.dormant).
+    $tier = [string] @($system.environments | Where-Object name -eq $Environment)[0].tier
+    $dormant = $system.azure.ContainsKey('frontDoor') -and $system.azure.frontDoor['dormant']
+    if (-not $dormant -and $system.system.ContainsKey('planSku') -and $system.system.planSku[$tier]) { return [string] $system.system.planSku[$tier] }
+    'F1'
+}
 function Get-RoleName([string] $Group, [string] $PrincipalId) {
     # Assignments at, above and below the group that name the principal; role names from their definitions.
     $subscription = [string] $system.azure.subscriptionId
@@ -227,9 +235,9 @@ $checks = [ordered] @{
     'CAP-032' = { foreach ($e in $environments) { $st = az stack group show --name "stack-$($slug)-$e" --resource-group (Get-Group $e) --query '{p: provisioningState, d: denySettings.mode}' --output json | ConvertFrom-Json; Assert-That ($st.p -eq 'succeeded' -and $st.d -eq 'denyWriteAndDelete') "$e stack $($st.p) $($st.d)" }; 'every stack succeeded, deny write and delete' }
     'CAP-033' = {
         if ($onAppService) {
-            # App Service: every environment's app runs on the Free plan of its tier; there is no size to declare.
-            foreach ($e in $environments) { $s = Get-Site $e; Assert-That ($s.sku.name -eq 'F1') "$e runs on $($s.sku.name), the template declares F1" }
-            return 'every app runs on the plan size the template declares (F1)'
+            # App Service: every environment's app runs on its tier's plan, of the size system.json declares (F1 without).
+            $sizes = foreach ($e in $environments) { $want = Get-DeclaredPlan $e; $s = Get-Site $e; Assert-That ($s.sku.name -eq $want) "$e runs on $($s.sku.name), system.json declares $want"; "$e $want" }
+            return "every app runs on the plan size system.json declares ($($sizes -join ', '))"
         }
         foreach ($entry in $system.environments) { $want = if ($entry.ContainsKey('appCpu')) { [double] $entry.appCpu } else { 0.5 }; $got = [double] (Get-App $entry.name).properties.template.containers[0].resources.cpu; Assert-That ($want -eq $got) "$($entry.name) has $got vCPU, system.json $want" }; 'app sizes follow system.json'
     }
@@ -263,7 +271,10 @@ $checks = [ordered] @{
     }
     'CAP-039' = {
         if ($onAppService) {
-            foreach ($e in $environments) { $s = Get-Site $e; Assert-That ($s.sku.tier -eq 'Free') "$e runs on the $($s.sku.tier) tier" }
+            # Free plans cost nothing; a tier may declare a Basic plan (system.planSku), which the dormant switch turns
+            # back to Free between classes. Either way no plan is larger than declared.
+            $paid = foreach ($e in $environments) { $want = Get-DeclaredPlan $e; $s = Get-Site $e; Assert-That ($s.sku.name -eq $want) "$e runs on $($s.sku.name), system.json declares $want"; if ($want -ne 'F1') { $e } }
+            if ($paid) { return "Free plans, except the declared Basic plan of $($paid -join ', '), which is Free while the system is dormant" }
             return 'every app runs on a Free plan'
         }
         foreach ($e in $environments) { $a = Get-App $e; Assert-That ($a.properties.template.scale.minReplicas -eq 0) "$e has min replicas $($a.properties.template.scale.minReplicas)" }; 'every app scales to zero'

@@ -167,6 +167,13 @@ foreach ($environment in $system.environments) {
     Test-Rule "environment $name versions.json keys" ($unknown.Count -eq 0) "unknown deployables: $($unknown -join ', ')"
 }
 
+# Optional: the size of a tier's App Service plan, { "<tier>": "F1" | "B1" } (F1, the Free plan, when left out).
+if ($system.system.ContainsKey('planSku')) {
+    $sizes = $system.system.planSku
+    $valid = $sizes -is [Collections.IDictionary] -and @($sizes.GetEnumerator() | Where-Object { @('nonprod', 'prod') -cnotcontains $_.Key -or @('F1', 'B1') -cnotcontains $_.Value }).Count -eq 0
+    Test-Rule 'system.planSku' $valid 'an object of tier (nonprod, prod) to F1 or B1'
+}
+
 if ($system.azure.ContainsKey('frontDoor') -and $system.azure.frontDoor.ContainsKey('dormant')) {
     Test-Rule 'azure.frontDoor.dormant' ($system.azure.frontDoor.dormant -is [bool]) 'true or false (set-demo-frontdoor.ps1 writes it)'
 }
