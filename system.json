@@ -5,7 +5,10 @@
     "location": "westus3",
     "githubOrg": "clearmeasure-aisf-sample-apps",
     "repository": "cmdemo2-system",
-    "sqlLocation": "centralus"
+    "sqlLocation": "centralus",
+    "planSku": {
+      "nonprod": "B1"
+    }
   },
   "azure": {
     "tenantId": "40645332-2e20-4bca-882c-b2706f93ce44",
