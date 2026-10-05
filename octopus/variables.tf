@@ -47,6 +47,9 @@ locals {
       # 0: sized from the worker (1.5 per core, 0.5 GB of memory per browser, at most 16).
       { key = "${name}-tests-workers", project = octopusdeploy_project.deployable[name].id, name = "AcceptanceTests.Workers", value = tostring(try(d.acceptanceTestsWorkers, 0)), environment = null },
       { key = "${name}-tests-delay", project = octopusdeploy_project.deployable[name].id, name = "AcceptanceTests.InputDelayMs", value = "200", environment = null },
+      # deployables[].acceptanceTestsFilter: the dotnet test filter of the run after a deployment (for example
+      # TestCategory=Smoke); empty runs the full suite. The app's pull requests always run the full suite.
+      { key = "${name}-tests-filter", project = octopusdeploy_project.deployable[name].id, name = "AcceptanceTests.Filter", value = try(d.acceptanceTestsFilter, ""), environment = null },
     ]
   ])
 
@@ -114,7 +117,7 @@ resource "octopusdeploy_variable" "github_token" {
   type            = "Sensitive"
   is_sensitive    = true
   sensitive_value = var.github_token
-  description     = "Reads environments/<env>/versions.json from main and, in deployable projects, commits the pin. From repository secret OCTOPUS_GITHUB_TOKEN."
+  description     = "Reads environments/<env>/versions.json from main and, in deployable projects, commits the pin; the dashboard's deployment reads system.json with it. From repository secret OCTOPUS_GITHUB_TOKEN."
 }
 
 # One task per environment at a time, across both projects and the runbooks: an app deployment, a system deployment

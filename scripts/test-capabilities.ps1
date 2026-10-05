@@ -246,8 +246,8 @@ $checks = [ordered] @{
         Assert-That $rolledBack "no successful redeployment of an older release in $first"; "an older release was redeployed successfully in $first (test-rollback.ps1)"
     }
     'CAP-038' = {
-        # The sign-off step exists once an environment follows the first: a system with one environment promotes nothing.
-        if ($environments.Count -lt 2) { Skip-Check 'no environment after the first yet' }
+        # The sign-off step is in the process from the start (it excludes the first environment), so a release made
+        # while the system had one environment still stops at it in every environment added later.
         foreach ($slug in $systemProject, $deployableProject) { $s = @(Get-ProcessStep $slug)[0]; Assert-That ($s.Name -eq 'Sign-off' -and $s.Actions[0].ActionType -eq 'Octopus.Manual') "$slug does not start with Sign-off" }
         Assert-That ((Get-RepoFile $systemRepo 'octopus/projects.tf') -match 'octopusdeploy_project_deployment_freeze') 'no freeze support'; 'Sign-off first in both projects; freezes from system.json'
     }
@@ -303,6 +303,7 @@ $checks = [ordered] @{
         # protected, and its origins are exactly the apps the environment's stack reports (primary and standby).
         $on = @($system.environments | Where-Object { @($_.capabilities) -contains 'frontdoor' } | ForEach-Object { [string] $_.name })
         if ($on.Count -eq 0) { Skip-Check 'no environment has capability frontdoor yet' }
+        if ($system.azure.frontDoor['dormant']) { Skip-Check 'Front Door is dormant (azure.frontDoor.dormant): the profile is removed between classes' }
         $edge = [string] $system.azure.frontDoor.resourceGroup
         $shown = foreach ($e in $on) {
             $st = az stack group show --name "stack-$slug-$e-edge" --resource-group $edge --query '{p: provisioningState, d: denySettings.mode, endpoints: outputs.endpoints.value}' --output json | ConvertFrom-Json -AsHashtable
@@ -356,6 +357,38 @@ $checks = [ordered] @{
         "requests of $role arriving in Application Insights in $($on -join ', ')"
     }
     'CAP-071' = { $noisy = @(Get-NoisyDeployment); Assert-That ($noisy.Count -eq 0) "warnings in: $($noisy -join '; ')"; 'the logs of every current deployment are clean' }
+    'CAP-075' = {
+        # One page shows every node: the dashboard (the deployable with hosting "staticwebapp") serves the topology its
+        # deployment wrote, and in every environment it runs in, that topology lists every environment of system.json
+        # and, for each App Service deployable, the nodes the naming convention gives (primary, and standby where the
+        # environment has a standbyLocation). A topology older than system.json fails: deploy the dashboard again.
+        $dashboard = @($system.deployables | Where-Object { $_['hosting'] -eq 'staticwebapp' }) | Select-Object -First 1
+        if (-not $dashboard) { Skip-Check 'no deployable with hosting staticwebapp yet' }
+        $dashboardName = [string] $dashboard.name
+        $apps = @($system.deployables | Where-Object { $_['hosting'] -eq 'appservice' } | ForEach-Object { [string] $_.name })
+        $want = @(foreach ($entry in $system.environments) {
+                foreach ($app in $apps) {
+                    "$($entry.name)/$app/app-$slug-$($entry.name)-$app"
+                    if ($entry['standbyLocation']) { "$($entry.name)/$app/app-$slug-$($entry.name)-$app-$($entry.standbyLocation)" }
+                }
+            })
+        $shown = foreach ($e in $environments) {
+            if (-not (Find-LastDeployment "$slug-$dashboardName" $e)) { continue }
+            $url = ([string] (az stack group show --name "stack-$slug-$e" --resource-group (Get-Group $e) --query "outputs.deployables.value[?name=='$dashboardName'].url | [0]" --output tsv)).Trim()
+            Assert-That ([bool] $url) "stack-$slug-$e lists no site for $dashboardName (a failed or unfinished apply?)"
+            $content = (Invoke-WebRequest -Uri "$url/topology.json" -TimeoutSec 120).Content
+            $topology = $(if ($content -is [byte[]]) { [Text.Encoding]::UTF8.GetString($content) } else { [string] $content }) | ConvertFrom-Json -AsHashtable
+            $listed = @($topology['environments'] | Where-Object { $_ })
+            $absent = @($environments | Where-Object { @($listed | ForEach-Object { [string] $_['name'] }) -notcontains $_ })
+            Assert-That ($absent.Count -eq 0) "the dashboard in $e does not list $($absent -join ', '): deploy the release of $slug-$dashboardName to $e again"
+            $got = @(foreach ($entry in $listed) { foreach ($d in @($entry['deployables'] | Where-Object { $_ })) { foreach ($node in @($d['nodes'] | Where-Object { $_ })) { "$($entry['name'])/$($d['name'])/$($node['name'])" } } })
+            $lost = @($want | Where-Object { $got -notcontains $_ })
+            Assert-That ($lost.Count -eq 0) "the dashboard in $e does not list the node(s) $($lost -join ', '): deploy the release of $slug-$dashboardName to $e again"
+            "$e $url"
+        }
+        if (-not $shown) { Skip-Check "no successful $slug-$dashboardName deployment yet" }
+        "$($environments.Count) environment(s) and $($want.Count) node(s) on one page: $($shown -join '; ')"
+    }
     'CAP-080' = { $files = @(gh api "repos/$systemRepo/contents/docs/architecture" --jq '.[].name'); $missing = @($files | Where-Object { $_ -like '*.puml' -and $files -notcontains ($_ -replace '\.puml$', '.png') }); Assert-That ($missing.Count -eq 0 -and $files.Count -gt 0) "not rendered: $missing"; "$(@($files | Where-Object { $_ -like '*.png' }).Count) diagrams rendered" }
     'CAP-081' = {
         $build = Get-RepoFile $systemRepo '.github/workflows/system.yml'; $nightly = Get-RepoFile $systemRepo '.github/workflows/capabilities.yml'
