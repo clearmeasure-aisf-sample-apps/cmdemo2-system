@@ -195,6 +195,8 @@ module appServiceStandby 'modules/appservice.bicep' = if (!empty(appServiceDeplo
     nameSuffix: '-${standbyLocation}'
     role: 'standby'
     planSku: planSku
+    // The standby reports like the primary: its requests matter most after a failover.
+    applicationInsightsConnectionString: contains(capabilities, 'telemetry') ? telemetry!.outputs.connectionString : ''
     tags: tags
     deployables: appServiceDeployables
     versions: versions
@@ -217,7 +219,8 @@ module staticSites 'modules/staticwebapp.bicep' = if (!empty(staticDeployables))
   }
 }
 
-// Only with a container deployable: a system whose apps all run on App Service has no Container Apps environment.
+// Only with a container deployable: a system whose apps all run on App Service has no Container Apps environment, and
+// no registry either (system.json then has no azure.registry: the seed creates none).
 module apps 'modules/containerapps.bicep' = if (!empty(containerDeployables)) {
   name: 'apps-${environmentName}'
   params: {
@@ -231,7 +234,7 @@ module apps 'modules/containerapps.bicep' = if (!empty(containerDeployables)) {
     tags: tags
     deployables: containerDeployables
     versions: versions
-    registryServer: system.azure.registry.loginServer
+    registryServer: union({ registry: { loginServer: '' } }, system.azure).registry.loginServer
     identityResourceId: app.resourceId
     connectionStringSecretUri: vault.outputs.connectionStringSecretUri
     applicationInsightsConnectionString: contains(capabilities, 'telemetry') ? telemetry!.outputs.connectionString : ''
