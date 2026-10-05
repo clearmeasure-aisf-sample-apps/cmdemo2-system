@@ -112,6 +112,15 @@
         "frontdoor"
       ],
       "acceptanceTests": true
+    },
+    {
+      "name": "uat",
+      "tier": "nonprod",
+      "capabilities": [
+        "baseline",
+        "frontdoor"
+      ],
+      "standbyLocation": "eastus2"
     }
   ]
 }
