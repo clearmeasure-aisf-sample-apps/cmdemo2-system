@@ -57,9 +57,6 @@ if (-not $endpoint) {
     Write-Highlight "No Front Door endpoint for $($standby.name) in $environmentName (capability frontdoor off, or the Front Door dormant): nothing to fail over."
     return
 }
-if (-not $primary.version) {
-    Fail-Step "$($primary.name) has no version in $environmentName yet: the test tells the regions apart by the app's /_healthcheck/detailed. Deploy the app first."
-}
 
 function Get-Answer {
     # One request for the detailed health report: the HTTP status and, when the app answered, its process start time.
@@ -109,9 +106,12 @@ function Wait-Answer {
 $name = [string] $primary.name
 $primaryApp = [string] $primary.webApp
 $publicUrl = [string] $endpoint.url
+# Both apps are asked directly first. The stack's outputs do not tell whether the app is deployed (they describe the
+# last apply, and an app release comes after it), so the app's own answer decides.
+$primaryStarted = (Get-Answer -Url ([string] $primary.url)).Started
 $standbyStarted = (Get-Answer -Url ([string] $standby.url)).Started
-if (-not $standbyStarted) {
-    Fail-Step "The standby of $name in $environmentName ($($standby.url)) does not answer: a failover now would be an outage. Nothing was stopped."
+if (-not $primaryStarted -or -not $standbyStarted) {
+    Fail-Step "$name does not answer /_healthcheck/detailed in both regions of $environmentName (primary: $(if ($primaryStarted) { 'yes' } else { 'no' }), standby: $(if ($standbyStarted) { 'yes' } else { 'no' })): the test tells the regions apart by that answer, and a failover without a healthy standby would be an outage. Deploy the app first. Nothing was stopped."
 }
 Write-Host "Baseline: waiting for $publicUrl to be served by the primary ($primaryApp)."
 $baseline = Wait-Answer -Url $publicUrl -Accept { param($a) $a.Status -eq 200 -and $a.Started -and $a.Started -ne $standbyStarted }
