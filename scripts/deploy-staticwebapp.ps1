@@ -624,7 +624,8 @@ $javaVersion = "$(@(java -version 2>&1)[0])".Trim()
 # PlantUML measures text with the fonts Java finds through fontconfig. A worker container without any font (the first
 # deployment of the runtime view on cmdemo2 stopped there) gets a minimal set before the render: fontconfig and DejaVu,
 # from the container's own package source. The step runs as root in the worker-tools container.
-$fonts = if (Get-Command fc-list -ErrorAction SilentlyContinue) { @(fc-list 2>$null | Where-Object { $_ }) } else { @() }
+# @() around the if: an if statement hands on an empty list as nothing at all, whose .Count fails under strict mode.
+$fonts = @(if (Get-Command fc-list -ErrorAction SilentlyContinue) { fc-list 2>$null | Where-Object { $_ } })
 if ($fonts.Count -eq 0) {
     $clock = [Diagnostics.Stopwatch]::StartNew()
     $env:DEBIAN_FRONTEND = 'noninteractive'
