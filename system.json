@@ -74,6 +74,10 @@
         "name": "id-cmdemo2-plan",
         "principalId": "d72a6e3a-5040-4595-a6d4-9af639ea1e86"
       }
+    },
+    "frontDoor": {
+      "profile": "afd-cmdemo2",
+      "resourceGroup": "rg-cmdemo2-edge"
     }
   },
   "octopus": {
@@ -104,7 +108,8 @@
       "name": "tdd",
       "tier": "nonprod",
       "capabilities": [
-        "baseline"
+        "baseline",
+        "frontdoor"
       ],
       "acceptanceTests": true
     }
