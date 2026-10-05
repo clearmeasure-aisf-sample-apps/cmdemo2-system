@@ -31,6 +31,8 @@ param identityResourceIds array
 param connectionStringSecretUris array
 @description('Application Insights connection string when the environment has capability "telemetry": the app exports to it with the Azure Monitor OpenTelemetry exporter.')
 param applicationInsightsConnectionString string = ''
+@description('Origins whose pages may read the apps\' answers (CORS), without credentials; empty: no CORS setting. main.bicep passes * when the system has a dashboard (hosting "staticwebapp"), whose page calls the apps\' health and version endpoints from the browser.')
+param corsAllowedOrigins array = []
 
 resource plan 'Microsoft.Web/serverfarms@2024-04-01' = if (ownsPlan) {
   name: planName
@@ -74,6 +76,15 @@ resource sites 'Microsoft.Web/sites@2024-04-01' = [
         ftpsState: 'Disabled'
         minTlsVersion: '1.2'
         http20Enabled: true
+        // CORS only when there are origins to allow. Null is "not set": a system without a dashboard deploys the
+        // site configuration it had before the setting existed, and a what-if shows no change. (The other way
+        // round too: taking the dashboard out of system.json leaves the setting on the existing sites.)
+        cors: empty(corsAllowedOrigins)
+          ? null
+          : {
+              allowedOrigins: corsAllowedOrigins
+              supportCredentials: false
+            }
         appSettings: concat(
           [
             {

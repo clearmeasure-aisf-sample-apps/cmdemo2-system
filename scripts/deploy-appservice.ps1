@@ -50,14 +50,12 @@ function Publish-Site {
     param([Parameter(Mandatory)] [hashtable] $Site)
     $webApp = [string] $Site.webApp
 
-    # The stack sets the startup command only once a version is pinned (an empty site with one would crash-loop): set it
-    # before the zip arrives, so the site starts the app and not the default page.
+    # The stack sets the startup command only once a version is pinned (an empty site with one would crash-loop), so
+    # the first deployment sets it here, after the zip: set before, the still empty site restarts into a start that
+    # fails, and the deployment below then reports "the site failed to start within 10 mins" although the app starts
+    # a minute later (cmdemo2's first release).
     $startup = [string] $Site.startupCommand
     $current = ([string] (az webapp config show --resource-group $resourceGroup --name $webApp --query appCommandLine --output tsv)).Trim()
-    if ($current -ne $startup) {
-        az webapp config set --resource-group $resourceGroup --name $webApp --startup-file $startup --only-show-errors --output none
-        Write-Host "Startup command of ${webApp}: $startup"
-    }
 
     Write-Host "Deploying $name $version ($([Math]::Round((Get-Item -LiteralPath $package).Length / 1MB)) MB) to $webApp"
     # az webapp deploy reports its progress as WARNING lines, which Octopus would log as warnings: errors only. A failed
@@ -77,6 +75,10 @@ function Publish-Site {
         $restarts = if ($usage) { [int] $usage.currentValue } else { 0 }
         Fail-Step ("$webApp did not start: state $($site.state), usage $($site.usageState), $restarts worker restarts this hour. " +
             'An app that crashes at startup restarts until the Free quota stops it; check its database login (system step "Grant database access") and its settings, then deploy again after the quota resets.')
+    }
+    if ($current -ne $startup) {
+        az webapp config set --resource-group $resourceGroup --name $webApp --startup-file $startup --only-show-errors --output none
+        Write-Host "Startup command of ${webApp}: $startup (the site restarts into the app; ""Verify deployable"" waits for it)"
     }
     Write-Highlight "$name $version deployed to $webApp in $environmentName ($($Site['role'] ?? 'primary'), $($Site['region'] ?? 'home region'))"
 }

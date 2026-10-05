@@ -30,13 +30,14 @@ resource "octopusdeploy_process" "system" {
   project_id = octopusdeploy_project.system.id
 }
 
+# Every environment but the first: the step excludes the first instead of naming the others, because a release keeps
+# the process as it was when the release was created. A release made before an environment existed then still stops
+# at the sign-off when it is promoted there.
 resource "octopusdeploy_process_step" "system_sign_off" {
-  count = length(local.promoted_environments) > 0 ? 1 : 0
-
-  process_id   = octopusdeploy_process.system.id
-  name         = "Sign-off"
-  type         = "Octopus.Manual"
-  environments = [for name in local.promoted_environments : octopusdeploy_environment.this[name].id]
+  process_id            = octopusdeploy_process.system.id
+  name                  = "Sign-off"
+  type                  = "Octopus.Manual"
+  excluded_environments = [octopusdeploy_environment.this[local.first_environment].id]
 
   execution_properties = {
     "Octopus.Action.RunOnServer"                       = "false"
@@ -139,7 +140,7 @@ resource "octopusdeploy_process_step" "system_middle_names" {
 resource "octopusdeploy_process_steps_order" "system" {
   process_id = octopusdeploy_process.system.id
   steps = concat(
-    [for step in octopusdeploy_process_step.system_sign_off : step.id],
+    [octopusdeploy_process_step.system_sign_off.id],
     [octopusdeploy_process_step.system_apply.id],
     [for step in octopusdeploy_process_step.system_grant : step.id],
     [for step in octopusdeploy_process_step.system_middle_names : step.id],
@@ -156,12 +157,12 @@ resource "octopusdeploy_process" "deployable" {
 }
 
 resource "octopusdeploy_process_step" "sign_off" {
-  for_each = length(local.promoted_environments) > 0 ? local.deployables : {}
+  for_each = local.deployables
 
-  process_id   = octopusdeploy_process.deployable[each.key].id
-  name         = "Sign-off"
-  type         = "Octopus.Manual"
-  environments = [for name in local.promoted_environments : octopusdeploy_environment.this[name].id]
+  process_id            = octopusdeploy_process.deployable[each.key].id
+  name                  = "Sign-off"
+  type                  = "Octopus.Manual"
+  excluded_environments = [octopusdeploy_environment.this[local.first_environment].id]
 
   execution_properties = {
     "Octopus.Action.RunOnServer"                       = "false"
@@ -250,12 +251,13 @@ resource "octopusdeploy_process_step" "migrate" {
 resource "octopusdeploy_process_step" "seed_demo_employees" {
   for_each = local.seeded_deployables
 
-  process_id     = octopusdeploy_process.deployable[each.key].id
-  name           = "Seed demo employees"
-  type           = "Octopus.AzurePowerShell"
-  environments   = [for name in local.seed_environments : octopusdeploy_environment.this[name].id]
-  worker_pool_id = local.worker_pool_id
-  container      = local.container
+  process_id = octopusdeploy_process.deployable[each.key].id
+  name       = "Seed demo employees"
+  type       = "Octopus.AzurePowerShell"
+  # The test environments excluded, not the others named: a release made before an environment existed seeds it too.
+  excluded_environments = [for name in local.test_environments : octopusdeploy_environment.this[name].id]
+  worker_pool_id        = local.worker_pool_id
+  container             = local.container
 
   packages = {
     tests = {
@@ -280,9 +282,10 @@ resource "octopusdeploy_process_step" "seed_demo_employees" {
   }
 }
 
-# Acceptance tests, in the environments with "acceptanceTests": true only. "Prepare test runner" starts with "Migrate
-# database" and pulls the test image meanwhile; the test steps follow "Revert pin", so a failed test keeps the pin
-# (the version runs) but fails the deployment, which blocks its promotion.
+# Acceptance tests, in the environments with "acceptanceTests": true only: the full suite, or the tests of the
+# deployable's acceptanceTestsFilter. "Prepare test runner" starts with "Migrate database" and pulls the test image
+# meanwhile; the test steps follow "Revert pin", so a failed test keeps the pin (the version runs) but fails the
+# deployment, which blocks its promotion.
 resource "octopusdeploy_process_step" "prepare_tests" {
   for_each = local.tested_deployables
 
@@ -434,6 +437,41 @@ resource "octopusdeploy_process_step" "deploy_appservice" {
   }
 }
 
+# Static deployables (the health dashboard): the release's zip (package <slug>-<deployable> in the built-in feed,
+# extracted) onto the Static Web App the stack created, with the topology.json the step writes into it
+# (scripts/deploy-staticwebapp.ps1).
+resource "octopusdeploy_process_step" "deploy_staticwebapp" {
+  for_each = local.static_deployables
+
+  process_id     = octopusdeploy_process.deployable[each.key].id
+  name           = "Update deployable"
+  type           = "Octopus.AzurePowerShell"
+  worker_pool_id = local.worker_pool_id
+  container      = local.container
+
+  packages = {
+    site = {
+      package_id           = "${local.slug}-${each.key}"
+      feed_id              = local.built_in_feed_id
+      acquisition_location = "Server"
+      properties = {
+        Extract       = "True"
+        Purpose       = ""
+        SelectionMode = "immediate"
+      }
+    }
+  }
+
+  execution_properties = {
+    "Octopus.Action.Azure.AccountId"     = "#{Azure.Account}"
+    "Octopus.Action.RunOnServer"         = "true"
+    "Octopus.Action.Script.ScriptSource" = "Inline"
+    "Octopus.Action.Script.Syntax"       = "PowerShell"
+    "Octopus.Action.Script.ScriptBody"   = file("${path.module}/../scripts/deploy-staticwebapp.ps1")
+    "OctopusUseBundledTooling"           = "False"
+  }
+}
+
 resource "octopusdeploy_process_step" "verify" {
   for_each = local.deployables
 
@@ -478,7 +516,7 @@ resource "octopusdeploy_process_steps_order" "deployable" {
 
   process_id = octopusdeploy_process.deployable[each.key].id
   steps = concat(
-    contains(keys(octopusdeploy_process_step.sign_off), each.key) ? [octopusdeploy_process_step.sign_off[each.key].id] : [],
+    [octopusdeploy_process_step.sign_off[each.key].id],
     contains(keys(octopusdeploy_process_step.restore_point), each.key) ? [octopusdeploy_process_step.restore_point[each.key].id] : [],
     [octopusdeploy_process_step.pin[each.key].id],
     contains(keys(local.migrated_deployables), each.key) ? [octopusdeploy_process_step.migrate[each.key].id] : [],
@@ -486,6 +524,7 @@ resource "octopusdeploy_process_steps_order" "deployable" {
     contains(keys(local.seeded_deployables), each.key) ? [octopusdeploy_process_step.seed_demo_employees[each.key].id] : [],
     contains(keys(local.container_deployables), each.key) ? [octopusdeploy_process_step.update[each.key].id] : [],
     contains(keys(local.appservice_deployables), each.key) ? [octopusdeploy_process_step.deploy_appservice[each.key].id] : [],
+    contains(keys(local.static_deployables), each.key) ? [octopusdeploy_process_step.deploy_staticwebapp[each.key].id] : [],
     [
       octopusdeploy_process_step.verify[each.key].id,
       octopusdeploy_process_step.revert_pin[each.key].id,

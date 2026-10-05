@@ -204,7 +204,8 @@ function Start-AvailabilityProbe {
     if ($Outputs -and $Outputs.ContainsKey('deployables')) {
         foreach ($entry in @($Outputs.deployables.value)) {
             $paths[[string] $entry.name] = [string] $entry.healthPath
-            if ($entry['hosting'] -eq 'appservice') { $static[[string] $entry.name] = [string] $entry.url }
+            # App Service apps and static sites keep the URL the stack reports; container apps are listed below.
+            if (@('appservice', 'staticwebapp') -contains $entry['hosting']) { $static[[string] $entry.name] = [string] $entry.url }
         }
     }
     $probe = [hashtable]::Synchronized(@{ Stop = $false; Samples = [Collections.Generic.List[object]]::new(); Error = '' })
@@ -386,11 +387,16 @@ foreach ($site in @($applied.deployables.value | Where-Object { $_['hosting'] -e
 $frontDoor = if ($system.azure.ContainsKey('frontDoor')) { $system.azure.frontDoor } else { @{} }
 $edgeStackName = "$stackName-edge"
 $endpoints = @()
-if (@($applied.capabilities.value) -contains 'frontdoor') {
+# azure.frontDoor.dormant (set-demo-frontdoor.ps1 -Dormant): between classes the profile, the one part with a monthly
+# fee, is deleted; the capability stays declared, and the endpoints come back when the system is awake again.
+$dormant = [bool] $frontDoor['dormant']
+if (@($applied.capabilities.value) -contains 'frontdoor' -and -not $dormant) {
     if (-not $frontDoor['profile']) {
         Fail-Step "Environment $environmentName has capability frontdoor, but system.json has no azure.frontDoor: run the seed with azure.frontDoor in the demo file, and add its output to system.json."
     }
-    $edgeDeployables = @(foreach ($deployable in @($applied.deployables.value)) {
+    # A static site (hosting "staticwebapp") gets no endpoint: its platform already serves it from edge locations
+    # under an address of its own, and it has no standby to fail over to.
+    $edgeDeployables = @(foreach ($deployable in @($applied.deployables.value | Where-Object { $_['hosting'] -ne 'staticwebapp' })) {
             $origins = @(@{ name = 'primary'; hostName = ([uri] [string] $deployable.url).Host; priority = 1 })
             foreach ($site in @($standbySites | Where-Object { $_.name -eq $deployable.name })) {
                 $origins += @{ name = 'standby'; hostName = ([uri] [string] $site.url).Host; priority = 2 }
@@ -426,8 +432,18 @@ elseif ($frontDoor['resourceGroup']) {
     $hasEdgeStack = $LASTEXITCODE -eq 0
     $PSNativeCommandUseErrorActionPreference = $true
     if ($hasEdgeStack) {
-        az stack group delete --name $edgeStackName --resource-group ([string] $frontDoor.resourceGroup) --action-on-unmanage deleteResources --yes --output none
-        Write-Highlight "Front Door endpoints of $environmentName removed (capability frontdoor is off)."
+        # The operator may be removing the same stack, or its group, at this moment (going dormant): only a stack
+        # that is still there afterwards is a failure.
+        $PSNativeCommandUseErrorActionPreference = $false
+        az stack group delete --name $edgeStackName --resource-group ([string] $frontDoor.resourceGroup) --action-on-unmanage deleteResources --yes --output none 2>$null
+        az stack group show --name $edgeStackName --resource-group ([string] $frontDoor.resourceGroup) --output none 2>$null
+        $stillThere = $LASTEXITCODE -eq 0
+        $PSNativeCommandUseErrorActionPreference = $true
+        if ($stillThere) { Fail-Step "Stack $edgeStackName could not be removed from $($frontDoor.resourceGroup)." }
+        Write-Highlight "Front Door endpoints of $environmentName removed ($(if ($dormant) { 'the system is dormant' } else { 'capability frontdoor is off' }))."
+    }
+    elseif ($dormant) {
+        Write-Host "Front Door is dormant: $environmentName has no public address until the system is awake again."
     }
 }
 

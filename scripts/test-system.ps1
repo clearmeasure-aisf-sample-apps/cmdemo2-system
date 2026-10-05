@@ -11,10 +11,13 @@
     Prints PASS or FAIL per check and exits 1 when any check fails.
 
     - The slug, environment and deployable names follow the naming rules every template relies on.
+    - Each deployable's hosting is one the templates know: containerapp (the default), appservice or staticwebapp.
     - Each environment has a tier (nonprod or prod), a runtime identity from the seed and a folder
       environments/<env>/ with a versions.json object whose keys are deployables.
     - Each capability has a module: baseline is built in, every other one is infra/modules/<capability>.bicep.
     - employeeMiddleNames, where an environment has it, maps user names to middle names of 1 to 100 characters.
+    - acceptanceTestsFilter, where a deployable has it, is a dotnet test filter (for example TestCategory=Smoke) on a
+      deployable with an acceptance-test package.
 #>
 [CmdletBinding()]
 param(
@@ -49,6 +52,37 @@ foreach ($name in $deployableNames) {
     Test-Rule "deployable $name is not 'system'" ($name -cne 'system') 'the Octopus project <slug>-system is the environments project'
 }
 Test-Rule 'deployable names unique' (@($deployableNames | Select-Object -Unique).Count -eq $deployableNames.Count)
+foreach ($deployable in @($system.deployables)) {
+    # Optional: the dotnet test filter of the acceptance tests after a deployment (variable AcceptanceTests.Filter),
+    # conditions <property><operator><value> (operators = != ~ !~) joined by & or |, parentheses allowed. Without it
+    # the full suite runs; a filter that matches no test fails the step "Acceptance tests".
+    if ($deployable.ContainsKey('acceptanceTestsFilter')) {
+        $filter = $deployable.acceptanceTestsFilter
+        $terms = @(if ($filter -is [string]) { ($filter -replace '[()]', ' ') -split '[&|]' | ForEach-Object { $_.Trim() } })
+        $valid = $filter -is [string] -and $filter -cmatch '^\S(?:[^\r\n]*\S)?$' -and $terms.Count -gt 0 -and
+            @($terms | Where-Object { $_ -cnotmatch '^[A-Za-z]+\s*(?:!=|!~|=|~)\s*[^\s=~!&|()](?:[^&|()]*[^\s&|()])?$' }).Count -eq 0
+        Test-Rule "deployable $($deployable.name) acceptanceTestsFilter" ($valid -and [string] $deployable['acceptanceTestsPackage'] -ne '') 'a dotnet test filter such as TestCategory=Smoke (conditions <property><operator><value> with = != ~ !~, joined by & or |), on a deployable with acceptanceTestsPackage'
+    }
+}
+
+# Where a deployable runs: infra/main.bicep and octopus/main.tf have a module and an "Update deployable" step per
+# hosting, and a value they do not know would get neither.
+$hostings = @('containerapp', 'appservice', 'staticwebapp')
+foreach ($deployable in @($system.deployables)) {
+    if ($deployable.ContainsKey('hosting')) {
+        Test-Rule "deployable $($deployable.name) hosting" ($hostings -ccontains [string] $deployable.hosting) "'$($deployable.hosting)' is not one of $($hostings -join ', ') (containerapp when left out)"
+    }
+}
+# A static site is the dashboard of the system's apps: the first deployable is the app the checks and the operator
+# scripts ask, so it is never the static site.
+if (@($system.deployables).Count -gt 0) {
+    Test-Rule 'first deployable is an app' (@($system.deployables)[0]['hosting'] -cne 'staticwebapp') 'the first deployable is the system''s first app; add a staticwebapp deployable after it'
+}
+# The Free plan of Static Web Apps exists in these regions only (system.staticLocation; centralus when left out).
+if ($system.system.ContainsKey('staticLocation')) {
+    $staticRegions = @('westus2', 'centralus', 'eastus2', 'westeurope', 'eastasia')
+    Test-Rule 'system staticLocation' ($staticRegions -ccontains [string] $system.system.staticLocation) "'$($system.system.staticLocation)' is not one of $($staticRegions -join ', ')"
+}
 
 $environmentNames = @($system.environments | ForEach-Object { [string] $_.name })
 Test-Rule 'environments present' ($environmentNames.Count -gt 0)
@@ -112,6 +146,10 @@ foreach ($environment in $system.environments) {
     $versions = Get-Content -LiteralPath $versionsFile -Raw | ConvertFrom-Json -AsHashtable
     $unknown = @($versions.Keys | Where-Object { $deployableNames -notcontains $_ })
     Test-Rule "environment $name versions.json keys" ($unknown.Count -eq 0) "unknown deployables: $($unknown -join ', ')"
+}
+
+if ($system.azure.ContainsKey('frontDoor') -and $system.azure.frontDoor.ContainsKey('dormant')) {
+    Test-Rule 'azure.frontDoor.dormant' ($system.azure.frontDoor.dormant -is [bool]) 'true or false (set-demo-frontdoor.ps1 writes it)'
 }
 
 foreach ($folder in Get-ChildItem -Path (Join-Path $Root 'environments') -Directory) {

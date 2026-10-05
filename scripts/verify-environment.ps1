@@ -11,7 +11,8 @@
     polls each deployable's URL (its health path once a version runs, / for a placeholder) until it answers 200.
     Deployable.Name limits the check to one deployable. The deadline covers a scale-from-zero start and a SQL
     database resuming from auto-pause; a revision that cannot start (crash loop, image pull failure, failed
-    provisioning) fails the step at once, with the container's last console lines.
+    provisioning) fails the step at once, with the container's last console lines. A static site (hosting
+    "staticwebapp") has no revision and no plan to ask: only its URL is polled.
 #>
 [CmdletBinding()]
 param()
@@ -110,6 +111,7 @@ function Write-RevisionLog {
 
 $failed = 0
 foreach ($deployable in $deployables) {
+    # Only a container app has one: empty for App Service and for a static site.
     $app = [string] $deployable['containerApp']
     $path = if ($only -and $healthPath) { $healthPath } else { [string] $deployable.healthPath }
     $uri = "$($deployable.url.TrimEnd('/'))$path"
@@ -125,10 +127,16 @@ foreach ($deployable in $deployables) {
         if ($status -eq 200) {
             break
         }
-        $problem = if ($deployable['hosting'] -eq 'appservice') { Get-SiteProblem -WebApp ([string] $deployable.webApp) } else { Get-RevisionProblem -App $app }
+        # What the platform says about an app that does not answer: the site for App Service, the revision for a
+        # container app. A static site (hosting "staticwebapp") has neither: its URL is all there is to ask.
+        $problem = switch ([string] $deployable['hosting']) {
+            'appservice' { Get-SiteProblem -WebApp ([string] $deployable.webApp) }
+            'staticwebapp' { $null }
+            default { Get-RevisionProblem -App $app }
+        }
         if ($problem) {
             Write-Warning "FAIL $($deployable.name) in ${environmentName}: $problem"
-            if ($deployable['hosting'] -ne 'appservice') { Write-RevisionLog -App $app }
+            if ($app) { Write-RevisionLog -App $app }
             $status = -1
             break
         }
@@ -143,7 +151,7 @@ foreach ($deployable in $deployables) {
     }
     else {
         Write-Warning "FAIL $($deployable.name) in ${environmentName}: $uri did not answer 200 within $deadlineMinutes minutes (last $status)"
-        if ($deployable['hosting'] -ne 'appservice') { Write-RevisionLog -App $app }
+        if ($app) { Write-RevisionLog -App $app }
         $failed++
     }
 }

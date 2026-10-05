@@ -1,9 +1,10 @@
-// Capability "frontdoor": the environment's public address. One Azure Front Door endpoint per deployable of the
-// environment, in the system's one Front Door profile (Standard; the seed creates it in a resource group of its own,
-// system.json azure.frontDoor), with the deployable's apps as origins: the primary region at priority 1 and, when the
-// environment has a standbyLocation, the standby at priority 2. Front Door probes every origin and sends the traffic
-// to the healthy origin of the lowest priority, so the standby takes over when the primary stops answering, and the
-// address stays the same when the apps move.
+// Capability "frontdoor": the environment's public address. One Azure Front Door endpoint per app of the environment
+// (a static site, hosting "staticwebapp", has an address of its own and gets none), in the system's one Front Door
+// profile (Standard; the seed creates it in a resource group of its own, system.json azure.frontDoor), with the
+// deployable's apps as origins: the primary region at priority 1 and, when the environment has a standbyLocation, the
+// standby at priority 2. Front Door probes every origin and sends the traffic to the healthy origin of the lowest
+// priority, so the standby takes over when the primary stops answering, and the address stays the same when the apps
+// move.
 // Unlike the other capabilities this module is not part of infra/main.bicep: the profile is shared by both tiers, so
 // scripts/apply-environment.ps1 applies it as a stack of its own, stack-<slug>-<env>-edge, in the profile's resource
 // group, with the origins the environment's stack reports. Its deny settings exclude only the tier's deploy identity,

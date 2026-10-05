@@ -33,12 +33,14 @@ locals {
   tiers        = toset([for e in local.system.environments : e.tier])
   deployables  = { for d in local.system.deployables : d.name => d }
 
-  # deployables[].hosting: "containerapp" (default) or "appservice" (a web app on the Free plan, zip deployed, with no
-  # database of its own). Only deployables with a databasePackage own the database: they migrate it and, in the prod
-  # tier, record a restore point first; an App Service deployable gets a login of its own (system step "Grant database
-  # access").
+  # deployables[].hosting: "containerapp" (default), "appservice" (a web app on the Free plan, zip deployed, with no
+  # database of its own) or "staticwebapp" (a site of static files on Azure Static Web Apps: the health dashboard).
+  # Only deployables with a databasePackage own the database: they migrate it and, in the prod tier, record a restore
+  # point first; an App Service deployable gets a login of its own (system step "Grant database access"); a static
+  # deployable has no database access at all.
   container_deployables  = { for name, d in local.deployables : name => d if try(d.hosting, "containerapp") == "containerapp" }
   appservice_deployables = { for name, d in local.deployables : name => d if try(d.hosting, "containerapp") == "appservice" }
+  static_deployables     = { for name, d in local.deployables : name => d if try(d.hosting, "containerapp") == "staticwebapp" }
   migrated_deployables   = { for name, d in local.deployables : name => d if try(d.databasePackage, "") != "" }
   # Environments whose app deployments run the acceptance tests (system.json environments[].acceptanceTests), and the
   # deployables that ship an acceptance-test package (deployables[].acceptanceTestsPackage).
@@ -49,16 +51,14 @@ locals {
   # Every other environment gets the demo employees from the app's own seeder (step "Seed demo employees", right after
   # "Migrate database"), run from the acceptance-test package of a deployable that owns the database and ships a data
   # loader assembly; in the environments above, ZDataLoader loads the same employees.
-  seed_environments = [for name, e in local.environments : name if !try(e.acceptanceTests, false)]
-  seeded_deployables = length(local.seed_environments) == 0 ? {} : {
+  seeded_deployables = {
     for name, d in local.migrated_deployables : name => d
     if try(d.acceptanceTestsPackage, "") != "" && try(d.dataLoaderAssembly, "") != ""
   }
   # Every environment after the first waits for a sign-off by the space's Space Managers (people join that team to
   # sign off; automation answers only with a recorded reason). Prod-tier environments record a restore point first.
-  promoted_environments = [for name, e in local.environments : name if e.sort_order > 1]
-  prod_environments     = [for name, e in local.environments : name if e.tier == "prod"]
-  sign_off_team_id      = "teams-spacemanagers-${local.system.octopus.spaceId}"
+  prod_environments = [for name, e in local.environments : name if e.tier == "prod"]
+  sign_off_team_id  = "teams-spacemanagers-${local.system.octopus.spaceId}"
   # Demo data: environments[].employeeMiddleNames ({ "<user name>": "<middle name>" }); the system step "Set employee
   # middle names" writes them to the environments that declare some.
   middle_name_environments = [for name, e in local.environments : name if length(try(e.employeeMiddleNames, {})) > 0]
