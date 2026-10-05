@@ -621,6 +621,23 @@ if (-not (Get-Command java -ErrorAction SilentlyContinue)) {
     Fail-Step "The worker container has no java, which renders the dashboard's runtime diagrams with PlantUML ${plantUmlVersion}: use a worker-tools image with a Java runtime (octopus/main.tf, worker_tools_image)."
 }
 $javaVersion = "$(@(java -version 2>&1)[0])".Trim()
+# PlantUML measures text with the fonts Java finds through fontconfig. A worker container without any font (the first
+# deployment of the runtime view on cmdemo2 stopped there) gets a minimal set before the render: fontconfig and DejaVu,
+# from the container's own package source. The step runs as root in the worker-tools container.
+$fonts = if (Get-Command fc-list -ErrorAction SilentlyContinue) { @(fc-list 2>$null | Where-Object { $_ }) } else { @() }
+if ($fonts.Count -eq 0) {
+    $clock = [Diagnostics.Stopwatch]::StartNew()
+    $env:DEBIAN_FRONTEND = 'noninteractive'
+    $PSNativeCommandUseErrorActionPreference = $false
+    $aptOutput = @(apt-get update -qq 2>&1) + @(apt-get install -y -qq --no-install-recommends fontconfig fonts-dejavu-core 2>&1)
+    $aptCode = $LASTEXITCODE
+    $PSNativeCommandUseErrorActionPreference = $true
+    $aptOutput | Where-Object { "$_".Trim() } | ForEach-Object { Write-Host "  apt: $_" }
+    if ($aptCode -ne 0) {
+        Fail-Step "The worker container has no fonts, which PlantUML needs to render the runtime diagrams, and installing fontconfig and fonts-dejavu-core failed (exit code $aptCode); its output is above."
+    }
+    Write-Host ('Fonts for PlantUML installed in {0:0.0} s (fontconfig, DejaVu): the worker container had none.' -f $clock.Elapsed.TotalSeconds)
+}
 $tools = Join-Path ([IO.Path]::GetTempPath()) "plantuml-$([Guid]::NewGuid().ToString('N'))"
 New-Item -ItemType Directory -Path $tools | Out-Null
 $runtimeProblem = $null
@@ -638,7 +655,10 @@ finally {
     Remove-Item -LiteralPath $tools -Recurse -Force -ErrorAction SilentlyContinue
 }
 if ($runtimeProblem) {
-    Fail-Step "The dashboard's runtime diagrams could not be made: $runtimeProblem"
+    # The whole problem as information first: Octopus shows a long failure message (PlantUML's output in it) as nothing
+    # but the exit code, as the first deployment of the runtime view on cmdemo2 showed.
+    @("$runtimeProblem" -split '\r?\n') | Where-Object { $_.Trim() } | ForEach-Object { Write-Host $_ }
+    Fail-Step "The dashboard's runtime diagrams could not be made: $((@("$runtimeProblem" -split '\r?\n'))[0]) (the full output is above)"
 }
 
 # The deployment token of the site: read now, kept in this variable only, handed to the CLI through its environment
