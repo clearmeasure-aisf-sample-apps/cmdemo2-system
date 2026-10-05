@@ -121,6 +121,15 @@
         "frontdoor"
       ],
       "standbyLocation": "eastus2"
+    },
+    {
+      "name": "prod",
+      "tier": "prod",
+      "capabilities": [
+        "baseline",
+        "frontdoor"
+      ],
+      "standbyLocation": "eastus2"
     }
   ]
 }
