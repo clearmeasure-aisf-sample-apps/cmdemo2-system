@@ -149,9 +149,10 @@ module vault 'modules/keyvault.bicep' = {
 // environment of a tier owns the tier's plan, the others in the tier run their web apps on it. App Service uses the
 // system's location (appLocation is a Container Apps quota matter).
 var planOwner = first(filter(system.environments, e => e.tier == environment.tier))!.name
-// system.planSku: { "<tier>": "B1" } gives a tier's plan in the system's location a size without the Free plan's daily
-// quotas (60 CPU minutes, 165 MB of outbound data for the whole plan: one run of browser acceptance tests exceeds it,
-// and Azure then stops every app on the plan until midnight UTC). The standby plans stay Free. While the system is
+// system.planSku: { "<tier>": "B1" } gives a tier's plans, in the system's location and in its standby regions, a size
+// without the Free plan's daily quotas (60 CPU minutes, 165 MB of outbound data for the whole plan: one run of browser
+// acceptance tests exceeds it, as do a few visitors who each download the app, and Azure then stops every app on the
+// plan until midnight UTC; a standby on a Free plan would be stopped by the very failover it exists for). While the system is
 // dormant (azure.frontDoor.dormant, set-demo-frontdoor.ps1) every plan is Free again: nothing costs money between classes.
 var planSkus = union({ nonprod: 'F1', prod: 'F1' }, union({ planSku: {} }, system.system).planSku)
 var dormant = bool(union({ dormant: false }, union({ frontDoor: {} }, system.azure).frontDoor).dormant)
@@ -193,6 +194,7 @@ module appServiceStandby 'modules/appservice.bicep' = if (!empty(appServiceDeplo
     ownsPlan: standbyPlanOwner == environmentName
     nameSuffix: '-${standbyLocation}'
     role: 'standby'
+    planSku: planSku
     tags: tags
     deployables: appServiceDeployables
     versions: versions

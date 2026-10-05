@@ -149,6 +149,13 @@ function Get-DeployedPackage([string] $Environment) {
     $package = @($release.SelectedPackages | Where-Object { $_.ActionName -eq 'Update deployable' })[0]
     @{ release = [string] $release.Version; package = [string] $package.Version }
 }
+function Get-StandbyPlan([string] $Environment) {
+    # The plan size of the first deployable's standby app, or $null without a standby region.
+    $webApp = ([string] (az stack group show --name "stack-$slug-$Environment" --resource-group (Get-Group $Environment) --query "outputs.standby.value[?name=='$deployable'].webApp | [0]" --output tsv)).Trim()
+    if (-not $webApp) { return $null }
+    $plan = ([string] (az resource show --name $webApp --resource-group (Get-Group $Environment) --resource-type Microsoft.Web/sites --query properties.serverFarmId --output tsv)).Trim()
+    ([string] (az resource show --ids $plan --query sku.name --output tsv)).Trim()
+}
 function Get-DeclaredPlan([string] $Environment) {
     # The plan size system.json declares for the environment's tier: system.planSku, F1 without it, and F1 for every
     # tier while the system is dormant (azure.frontDoor.dormant).
@@ -236,7 +243,13 @@ $checks = [ordered] @{
     'CAP-033' = {
         if ($onAppService) {
             # App Service: every environment's app runs on its tier's plan, of the size system.json declares (F1 without).
-            $sizes = foreach ($e in $environments) { $want = Get-DeclaredPlan $e; $s = Get-Site $e; Assert-That ($s.sku.name -eq $want) "$e runs on $($s.sku.name), system.json declares $want"; "$e $want" }
+            $sizes = foreach ($e in $environments) {
+                $want = Get-DeclaredPlan $e; $s = Get-Site $e; Assert-That ($s.sku.name -eq $want) "$e runs on $($s.sku.name), system.json declares $want"
+                # The standby region's plan has the tier's size too: a failover must not land on a smaller plan.
+                $standbyPlan = Get-StandbyPlan $e
+                if ($standbyPlan) { Assert-That ($standbyPlan -eq $want) "the standby of $e runs on $standbyPlan, system.json declares $want" }
+                "$e $want$(if ($standbyPlan) { ' (standby too)' })"
+            }
             return "every app runs on the plan size system.json declares ($($sizes -join ', '))"
         }
         foreach ($entry in $system.environments) { $want = if ($entry.ContainsKey('appCpu')) { [double] $entry.appCpu } else { 0.5 }; $got = [double] (Get-App $entry.name).properties.template.containers[0].resources.cpu; Assert-That ($want -eq $got) "$($entry.name) has $got vCPU, system.json $want" }; 'app sizes follow system.json'

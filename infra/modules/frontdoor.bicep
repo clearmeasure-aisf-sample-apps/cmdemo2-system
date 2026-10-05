@@ -22,7 +22,7 @@ param deployables array
 param probePath string = '/alive'
 @minValue(5)
 @maxValue(255)
-param probeIntervalInSeconds int = 30
+param probeIntervalInSeconds int = 10
 
 resource profile 'Microsoft.Cdn/profiles@2024-02-01' existing = {
   name: profileName
@@ -46,8 +46,10 @@ resource originGroups 'Microsoft.Cdn/profiles/originGroups@2024-02-01' = [
     name: '${slug}-${environmentName}-${d.name}'
     properties: {
       loadBalancingSettings: {
-        sampleSize: 4
-        successfulSamplesRequired: 3
+        // Every 10 seconds, healthy while 2 of the last 3 probes succeeded: a stopped primary is out of rotation after
+        // two failed probes. With probes every 30 seconds and 3 of 4, cmdemo2's uat needed 36 s and 142 s in two runs.
+        sampleSize: 3
+        successfulSamplesRequired: 2
         additionalLatencyInMilliseconds: 50
       }
       healthProbeSettings: {
