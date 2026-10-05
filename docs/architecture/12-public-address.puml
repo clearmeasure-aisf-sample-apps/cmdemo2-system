@@ -1,0 +1,51 @@
+@startuml 12-public-address
+!include _c4.iuml
+title CM demo 2 multi-region | Public address: Front Door in front of tdd (2026-10-04)
+
+Person(viewer, "Class audience", "Browser")
+
+Boundary(box, "Operator machine omarchy") {
+  Container(aiops, "Linux user aiops", "demo-environment skill", "new-demo-seed.ps1 with azure.frontDoor in the demo file; set-demo-capability.ps1 -Capability frontdoor")
+}
+
+Boundary(gh, "GitHub org clearmeasure-aisf-sample-apps") {
+  Container(sysrepo, "cmdemo2-system", "system repository", "system.json: azure.frontDoor names the group and the profile; tdd has capability frontdoor; infra/modules/frontdoor.bicep", $tags="new")
+}
+
+Boundary(octo, "Octopus space cmdemo2 demo") {
+  Container(rel_sys, "cmdemo2-system 1.0.6", "release", "Deployed to tdd: Apply environment applies the environment's stack, then its edge stack; Verify environment waits for the endpoint", $tags="new")
+}
+
+Boundary(edge, "rg-cmdemo2-edge (created by the seed)") {
+  Container(afd, "afd-cmdemo2", "Azure Front Door profile, Standard", "One for the whole system, both tiers; a monthly base fee, so set-demo-frontdoor.ps1 -Dormant deletes it between classes", $tags="new")
+  Boundary(edge_stack, "Deployment stack stack-cmdemo2-tdd-edge (deny write and delete)") {
+    Container(fd, "cmdemo2-tdd-ui", "Front Door endpoint, route /*", "https://cmdemo2-tdd-ui-fqbpbvbgdcgsb8bv.z02.azurefd.net; HTTP redirected to HTTPS", $tags="new")
+    Container(origins, "cmdemo2-tdd-ui", "Front Door origin group", "Probes /alive on every origin every 30 seconds; traffic goes to the healthy origin of the lowest priority", $tags="new")
+  }
+}
+
+Boundary(rgn, "rg-cmdemo2-nonprod") {
+  Container(id_dn, "id-cmdemo2-deploy-nonprod", "managed identity", "Contributor and Azure Deployment Stack Owner of rg-cmdemo2-edge; the only principal the edge stacks of the nonprod environments exclude from their deny settings", $tags="new")
+  Container(id_plan, "id-cmdemo2-plan", "managed identity", "Reader of rg-cmdemo2-edge: capability checks of the endpoints", $tags="new")
+  Boundary(stack, "stack-cmdemo2-tdd") {
+    Container(app, "app-cmdemo2-tdd-ui", "App Service web app on asp-cmdemo2-tdd, Free (F1)", "https://app-cmdemo2-tdd-ui.azurewebsites.net; reported by the stack as the endpoint's origin")
+  }
+}
+
+Boundary(rgp, "rg-cmdemo2-prod") {
+  Container(id_dp, "id-cmdemo2-deploy-prod", "managed identity", "Contributor and Azure Deployment Stack Owner of rg-cmdemo2-edge: the endpoints of the prod environments, in edge stacks that exclude only it", $tags="new")
+}
+
+Rel(aiops, edge, "seed: the group, the profile, the role assignments", $tags="new")
+Rel(aiops, sysrepo, "pull request: azure.frontDoor, capability frontdoor", $tags="new")
+Rel(sysrepo, rel_sys, "merge to main: system release")
+Rel(rel_sys, id_dn, "Apply environment", "Octopus OIDC")
+Rel(id_dn, edge_stack, "az stack group create", $tags="new")
+Rel(id_dp, edge, "may write: edge stacks of its own tier", $tags="new")
+Rel(id_plan, edge, "reads", $tags="new")
+Rel(viewer, fd, "HTTPS", $tags="new")
+Rel(fd, origins, "route", $tags="new")
+Rel(origins, app, "origin primary, priority 1", "HTTPS, the app's own host name", $tags="new")
+
+SHOW_LEGEND()
+@enduml
