@@ -29,14 +29,27 @@
                                 its Octopus project
        The dashboard compares the pinned version with the version each node reports and links to the project and to
        the history. An address whose parts system.json does not give is null, and the dashboard leaves that part out.
-    2. The deployment, with the Static Web Apps CLI and the site's deployment token. The token is read from Azure
+    2. runtime/, next to topology.json: per environment of system.json a C4 deployment diagram (PlantUML source
+       <env>.puml, the SVG <env>.svg and its manifest <env>.json), and index.json, the list of them (the contract is in
+       the dashboard repository's README, "The runtime view"). The diagram is drawn from the topology and system.json:
+       Azure subscription > resource group (the tier's, and azure.frontDoor.resourceGroup) > region (primary
+       system.location, standby, the database's system.sqlLocation, the static sites' system.staticLocation) > App
+       Service plan (asp-<slug>-<first environment of the tier>, asp-<slug>-<first environment of the tier with that
+       standby>-<region>; size system.planSku.<tier>, F1 without it and while azure.frontDoor.dormant) > web app; the
+       Front Door endpoint in the profile; the database sqldb-<slug>-<env>; the static sites; the browser. Every node,
+       region and Front Door or database relationship has a slot, a transparent image of a fixed size, where the
+       dashboard draws the live values. The script downloads the PlantUML release jar of the pinned version from GitHub,
+       verifies its SHA-256, renders every diagram in one Java process (layout engine smetana: no Graphviz; security
+       profile SANDBOX) and checks that each SVG has every element the manifest names; a missing one fails the step.
+       Java's output is logged as information; the download and the render are timed.
+    3. The deployment, with the Static Web Apps CLI and the site's deployment token. The token is read from Azure
        when the step runs (the deploy identity may; the stack's deny settings keep everyone else from listing it),
        reaches the CLI through an environment variable, and is never stored, printed or passed as an argument.
-    3. The proof: the site serves the topology this step wrote.
+    4. The proof: the site serves the topology this step wrote.
 
     The topology is a picture of system.json at the time of the deployment. After a change to the environments, a
     standby region or a Front Door endpoint, deploy the dashboard's release again in every environment that has it:
-    until then its page shows the old picture. An environment that is in system.json but not applied yet shows its
+    until then its page shows the old picture, the runtime diagrams too. An environment that is in system.json but not applied yet shows its
     nodes as unreachable. The pinned versions are not part of the picture: the dashboard reads versions.json itself,
     every time it checks the nodes.
 #>
@@ -57,6 +70,13 @@ $env:AZURE_BICEP_USE_BINARY_FROM_PATH = 'false'
 # The Static Web Apps CLI, at a fixed version: a promotion deploys with the tool the earlier environments used.
 $swaCliVersion = '2.0.10'
 $swaCliNodeVersion = 18
+
+# PlantUML, at a fixed version, for the runtime diagrams: the release jar of github.com/plantuml/plantuml, checked
+# against this SHA-256 before it runs. The dashboard finds the drawn elements by attributes of PlantUML's SVG that are
+# not a documented contract (they changed in 1.2026.3 and 1.2026.4), so a new version is a change of this script,
+# checked by rendering (Write-RuntimeDiagram fails the step when a handle is missing).
+$plantUmlVersion = '1.2026.8'
+$plantUmlSha256 = '5E1ECFA8ECD32C90B03BBF3B1EB6F020943F98AB0FCF4032BE31A0002EE2C462'
 
 function ConvertTo-Topology {
     # The dashboard's topology from system.json (parsed, as a hashtable) and the host name of each Front Door endpoint
@@ -118,6 +138,397 @@ function ConvertTo-Topology {
         generated    = $Generated.ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ssZ', [Globalization.CultureInfo]::InvariantCulture)
         environments = $environments
     }
+}
+
+function New-TransparentPng {
+    # A fully transparent PNG of the given size, as a data: URI. The runtime diagrams reserve the room the browser draws
+    # into with such an image (a "slot"): PlantUML lays it out like any image, and its size never depends on text.
+    param(
+        [Parameter(Mandatory)] [int] $Width,
+        [Parameter(Mandatory)] [int] $Height
+    )
+    function ConvertTo-BigEndian { param([uint32] $Value) [byte[]] @((($Value -shr 24) -band 255), (($Value -shr 16) -band 255), (($Value -shr 8) -band 255), ($Value -band 255)) }
+    function Get-Crc32 {
+        param([byte[]] $Bytes)
+        [uint32] $crc = [uint32]::MaxValue
+        foreach ($byte in $Bytes) {
+            $crc = [uint32] ($crc -bxor $byte)
+            for ($bit = 0; $bit -lt 8; $bit++) {
+                $crc = if ($crc -band 1) { [uint32] (($crc -shr 1) -bxor 0xEDB88320u) } else { [uint32] ($crc -shr 1) }
+            }
+        }
+        [uint32] ($crc -bxor [uint32]::MaxValue)
+    }
+    function New-Chunk {
+        param([string] $Type, [byte[]] $Data)
+        $typed = [byte[]] ([Text.Encoding]::ASCII.GetBytes($Type) + $Data)
+        [byte[]] ((ConvertTo-BigEndian ([uint32] $Data.Length)) + $typed + (ConvertTo-BigEndian (Get-Crc32 $typed)))
+    }
+    # Every row: filter byte 0, then width RGBA pixels of 0 (transparent black).
+    $raw = [byte[]]::new(($Width * 4 + 1) * $Height)
+    $buffer = [IO.MemoryStream]::new()
+    $zlib = [IO.Compression.ZLibStream]::new($buffer, [IO.Compression.CompressionLevel]::SmallestSize, $true)
+    $zlib.Write($raw, 0, $raw.Length)
+    $zlib.Dispose()
+    $header = [byte[]] ((ConvertTo-BigEndian ([uint32] $Width)) + (ConvertTo-BigEndian ([uint32] $Height)) + [byte[]] @(8, 6, 0, 0, 0))
+    $png = [byte[]] @(137, 80, 78, 71, 13, 10, 26, 10) + (New-Chunk 'IHDR' $header) + (New-Chunk 'IDAT' $buffer.ToArray()) + (New-Chunk 'IEND' ([byte[]] @()))
+    return "data:image/png;base64,$([Convert]::ToBase64String([byte[]] $png))"
+}
+
+function ConvertTo-RuntimeDiagram {
+    # The runtime diagram of one environment: PlantUML source (C4 deployment view) and the manifest that tells the
+    # dashboard which drawn element is which. It asks nothing: the same input gives the same diagram.
+    #
+    # Input: system.json (parsed, as a hashtable), the topology ConvertTo-Topology made of it (the nodes, their
+    # addresses and the Front Door addresses), the environment's name, and the dashboard's address per environment when
+    # known (the stack of the environment that deploys knows its own; the others' are not conventions).
+    #
+    # Aliases (PlantUML's names of the elements; the dashboard finds the drawn elements by them, and the manifest maps
+    # each to what the browser knows). <d> is a deployable's name with every character but a letter or a digit as "_":
+    #   browser                     the person: a browser on the internet
+    #   sub                         boundary: the Azure subscription
+    #   rg_edge, rg_tier            boundaries: the Front Door's resource group, the environment's tier's group
+    #   afd                         the Front Door profile (azure.frontDoor.profile)
+    #   region_primary, region_standby, region_data, region_static
+    #                               boundaries: one per Azure region, named after its first role: the primary region
+    #                               (system.location), the standby (environments[].standbyLocation), the database's
+    #                               (system.sqlLocation) and the static sites' (system.staticLocation). A region with
+    #                               two roles is one boundary.
+    #   plan_primary, plan_standby  the App Service plans
+    #   fd_<d>                      the Front Door endpoint of an App Service deployable
+    #   app_<d>_primary, app_<d>_standby   its web apps
+    #   sqldb                       the environment's Azure SQL database
+    #   swa_<d>                     the Static Web App of a static deployable (the dashboard)
+    # Every relationship has the id "<from>-to-<to>" (PlantUML's own form): browser-to-fd_<d>, fd_<d>-to-app_<d>_primary
+    # (origin, priority 1), fd_<d>-to-app_<d>_standby (priority 2), app_<d>_<role>-to-sqldb, browser-to-swa_<d>, and
+    # without a Front Door endpoint browser-to-app_<d>_<role>.
+    #
+    # Slots: every node's description is a transparent image of a fixed size, and so is the description of every
+    # origin and database relationship and of every region: the dashboard draws the live values into those rectangles.
+    param(
+        [Parameter(Mandatory)] [hashtable] $System,
+        [Parameter(Mandatory)] [System.Collections.IDictionary] $Topology,
+        [Parameter(Mandatory)] [string] $Environment,
+        [hashtable] $DashboardUrl = @{}
+    )
+    $slug = [string] $System.system.slug
+    $location = [string] $System.system.location
+    $sqlLocation = if ($System.system['sqlLocation']) { [string] $System.system.sqlLocation } else { $location }
+    $staticLocation = if ($System.system['staticLocation']) { [string] $System.system.staticLocation } else { 'centralus' }
+    $entry = @($System.environments | Where-Object { [string] $_.name -eq $Environment }) | Select-Object -First 1
+    if (-not $entry) { throw "system.json has no environment $Environment." }
+    $tier = [string] $entry['tier']
+    $standbyLocation = [string] $entry['standbyLocation']
+    $tierGroup = [string] $System.azure.resourceGroups[$tier]
+    $frontDoor = if ($System.azure.ContainsKey('frontDoor')) { $System.azure.frontDoor } else { @{} }
+    $dormant = [bool] $frontDoor['dormant']
+    $hasFrontDoor = (@($entry['capabilities']) -contains 'frontdoor') -and $frontDoor['profile'] -and -not $dormant
+    $planSkus = if ($System.system['planSku']) { $System.system.planSku } else { @{} }
+    $size = if (-not $dormant -and $planSkus[$tier]) { [string] $planSkus[$tier] } else { 'F1' }
+    $sameTier = @($System.environments | Where-Object { [string] $_['tier'] -eq $tier })
+    $statics = @($System.deployables | Where-Object { $_['hosting'] -eq 'staticwebapp' })
+    $topologyEnvironment = @($Topology.environments | Where-Object { $_.name -eq $Environment }) | Select-Object -First 1
+    $apps = if ($topologyEnvironment) { @($topologyEnvironment.deployables) } else { @() }
+
+    $aliasOf = @{}
+    function Get-DeployableAlias {
+        param([string] $Name)
+        $alias = $Name -replace '[^A-Za-z0-9]', '_'
+        if ($aliasOf.ContainsKey($alias) -and $aliasOf[$alias] -ne $Name) {
+            throw "Deployables $($aliasOf[$alias]) and $Name have the same alias $alias in the runtime diagram: rename one."
+        }
+        $aliasOf[$alias] = $Name
+        $alias
+    }
+    function Get-Quoted { param([string] $Text) '"' + ($Text -replace '"', "'") + '"' }
+
+    # Slots: the room for a tile, a region's label and a number line of a relationship (pixels; the dashboard's
+    # runtime.js draws into them and assumes nothing about their size but what the SVG says).
+    $tileSlot = "<img:$(New-TransparentPng -Width 250 -Height 98)>"
+    $smallTileSlot = "<img:$(New-TransparentPng -Width 250 -Height 46)>"
+    $regionSlot = "<img:$(New-TransparentPng -Width 190 -Height 22)>"
+    $edgeSlot = "<img:$(New-TransparentPng -Width 160 -Height 34)>"
+
+    # The regions, a region with two roles once, named after its first role. The standby is declared before the
+    # primary: PlantUML's layout engine (smetana) stacks the last declared on top, and the primary belongs there.
+    $regions = [ordered] @{}
+    function Add-Region {
+        param([string] $Name, [string] $Role)
+        if (-not $Name) { return }
+        if (-not $regions.Contains($Name)) { $regions[$Name] = [ordered] @{ alias = "region_$Role"; name = $Name; roles = [Collections.Generic.List[string]]::new() } }
+        if (-not $regions[$Name].roles.Contains($Role)) { $regions[$Name].roles.Add($Role) }
+    }
+    if ($apps.Count -gt 0) {
+        if ($standbyLocation) { Add-Region $standbyLocation 'standby' }
+        Add-Region $location 'primary'
+    }
+    Add-Region $sqlLocation 'data'
+    if ($statics.Count -gt 0) { Add-Region $staticLocation 'static' }
+
+    $nodes = [Collections.Generic.List[object]]::new()
+    $edges = [Collections.Generic.List[object]]::new()
+    $regionManifest = [Collections.Generic.List[object]]::new()
+    $edgeLines = [Collections.Generic.List[string]]::new()
+    function Add-Node {
+        param([System.Collections.Specialized.OrderedDictionary] $Node)
+        $nodes.Add($Node)
+    }
+    function Add-Edge {
+        param([string] $From, [string] $To, [string] $Kind, [string] $Label, [string] $Technology, [bool] $Slot, [int] $Priority = 0)
+        $id = "$From-to-$To"
+        $edge = [ordered] @{ id = $id; from = $From; to = $To; kind = $Kind }
+        if ($Priority) { $edge.priority = $Priority }
+        $edges.Add($edge)
+        $description = if ($Slot) { $edgeSlot + '\n<U+00A0>' } else { '' }
+        $edgeLines.Add("Rel($From, $To, $(Get-Quoted $Label), $(Get-Quoted $Technology), $(Get-Quoted $description))")
+    }
+
+    $lines = [Collections.Generic.List[string]]::new()
+    $lines.Add('@startuml')
+    $lines.Add('!pragma layout smetana')
+    $lines.Add('!include <C4/C4_Deployment>')
+    $lines.Add('LAYOUT_LEFT_RIGHT()')
+    $lines.Add('HIDE_STEREOTYPE()')
+    $lines.Add('SHOW_PERSON_OUTLINE()')
+    $lines.Add('skinparam wrapWidth 300')
+    $lines.Add('skinparam maxMessageSize 220')
+    $lines.Add('skinparam nodesep 30')
+    $lines.Add('skinparam ranksep 40')
+    # The look before the dashboard updates it (and of a diagram opened on its own): neutral, nothing claims a state.
+    $lines.Add('UpdateElementStyle("container", $bgColor="#607d8b", $fontColor="#ffffff", $borderColor="#455a64")')
+    $lines.Add('UpdateElementStyle("person", $bgColor="#37474f", $fontColor="#ffffff", $borderColor="#263238")')
+    $lines.Add('AddBoundaryTag("scope", $bgColor="#ffffff", $fontColor="#263238", $borderColor="#78909c", $borderStyle=DottedLine())')
+    $lines.Add('AddNodeTag("region", $bgColor="#fafafa", $fontColor="#37474f", $borderColor="#90a4ae", $borderStyle=DashedLine())')
+    $lines.Add('AddNodeTag("plan", $bgColor="#ffffff", $fontColor="#37474f", $borderColor="#b0bec5")')
+    $lines.Add('UpdateRelStyle($textColor="#455a64", $lineColor="#78909c")')
+    $lines.Add('')
+    $lines.Add('Person(browser, "Browser", "a user, or this dashboard")')
+    $nodes.Add([ordered] @{ alias = 'browser'; qualifiedName = 'browser'; kind = 'person'; name = 'Browser' })
+    $lines.Add('Boundary(sub, "Azure subscription", $type="subscription", $tags="scope") {')
+
+    if ($hasFrontDoor -and $apps.Count -gt 0) {
+        $profileName = [string] $frontDoor.profile
+        $lines.Add("  Boundary(rg_edge, $(Get-Quoted ([string] $frontDoor.resourceGroup)), `$type=`"resource group`", `$tags=`"scope`") {")
+        $lines.Add("    Deployment_Node(afd, $(Get-Quoted $profileName), `"Front Door profile, Standard: global`", `$tags=`"plan`") {")
+        foreach ($app in $apps) {
+            $alias = "fd_$(Get-DeployableAlias $app.name)"
+            $endpoint = "$slug-$Environment-$($app.name)"
+            $lines.Add("      Container($alias, $(Get-Quoted $endpoint), `"Front Door endpoint`", $(Get-Quoted $tileSlot))")
+            Add-Node ([ordered] @{ alias = $alias; qualifiedName = "sub.rg_edge.afd.$alias"; kind = 'frontdoor'; deployable = [string] $app.name; name = $endpoint; url = $app.frontDoor })
+        }
+        $lines.Add('    }')
+        $lines.Add('  }')
+    }
+
+    $lines.Add("  Boundary(rg_tier, $(Get-Quoted $tierGroup), `$type=`"resource group`", `$tags=`"scope`") {")
+    foreach ($region in $regions.Values) {
+        $roles = @($region.roles | ForEach-Object { switch ($_) { 'static' { 'static sites' } default { $_ } } })
+        $type = "Azure region: $($roles -join ', ')"
+        $lines.Add("    Deployment_Node($($region.alias), $(Get-Quoted $region.name), $(Get-Quoted $type), $(Get-Quoted $regionSlot), `$tags=`"region`") {")
+        $regionManifest.Add([ordered] @{ alias = $region.alias; qualifiedName = "sub.rg_tier.$($region.alias)"; name = $region.name; roles = @($region.roles) })
+        foreach ($role in 'primary', 'standby') {
+            if (-not $region.roles.Contains($role)) { continue }
+            if ($role -eq 'primary') {
+                $owner = [string] $sameTier[0].name
+                $plan = "asp-$slug-$owner"
+                $sharing = @($sameTier | ForEach-Object { [string] $_.name })
+            }
+            else {
+                $withStandby = @($sameTier | Where-Object { [string] $_['standbyLocation'] -eq $standbyLocation })
+                $plan = "asp-$slug-$([string] $withStandby[0].name)-$standbyLocation"
+                $sharing = @($withStandby | ForEach-Object { [string] $_.name })
+            }
+            $shared = if ($sharing.Count -gt 1) { "shared by $($sharing -join ', ')" } else { '' }
+            $lines.Add("      Deployment_Node(plan_$role, $(Get-Quoted $plan), `"App Service plan, $size`", $(Get-Quoted $shared), `$tags=`"plan`") {")
+            foreach ($app in $apps) {
+                $node = @($app.nodes | Where-Object { $_.role -eq $role }) | Select-Object -First 1
+                if (-not $node) { continue }
+                $alias = "app_$(Get-DeployableAlias $app.name)_$role"
+                $lines.Add("        Container($alias, $(Get-Quoted $node.name), $(Get-Quoted "web app: $($app.name)"), $(Get-Quoted $tileSlot))")
+                Add-Node ([ordered] @{ alias = $alias; qualifiedName = "sub.rg_tier.$($region.alias).plan_$role.$alias"; kind = 'webapp'; deployable = [string] $app.name; name = [string] $node.name; role = $role; region = [string] $node.region; regionAlias = $region.alias; url = [string] $node.url })
+            }
+            $lines.Add('      }')
+        }
+        if ($region.roles.Contains('data')) {
+            $database = "sqldb-$slug-$Environment"
+            $lines.Add("      ContainerDb(sqldb, $(Get-Quoted $database), `"Azure SQL database`", $(Get-Quoted $smallTileSlot))")
+            Add-Node ([ordered] @{ alias = 'sqldb'; qualifiedName = "sub.rg_tier.$($region.alias).sqldb"; kind = 'sql'; name = $database; region = $region.name; regionAlias = $region.alias; url = $null })
+        }
+        if ($region.roles.Contains('static')) {
+            foreach ($static in $statics) {
+                $alias = "swa_$(Get-DeployableAlias $static.name)"
+                $site = "swa-$slug-$Environment-$($static.name)"
+                $lines.Add("      Container($alias, $(Get-Quoted $site), $(Get-Quoted "Static Web App: $($static.name)"), $(Get-Quoted $smallTileSlot))")
+                $address = if ($DashboardUrl[$Environment]) { [string] $DashboardUrl[$Environment] } else { $null }
+                Add-Node ([ordered] @{ alias = $alias; qualifiedName = "sub.rg_tier.$($region.alias).$alias"; kind = 'staticsite'; deployable = [string] $static.name; name = $site; region = $region.name; regionAlias = $region.alias; url = $address })
+            }
+        }
+        $lines.Add('    }')
+    }
+    $lines.Add('  }')
+    $lines.Add('}')
+
+    # The relationships, after the boundaries: the browser to the public addresses, Front Door to its origins, every
+    # web app to the database.
+    foreach ($app in $apps) {
+        $key = Get-DeployableAlias $app.name
+        $roles = @($app.nodes | ForEach-Object { [string] $_.role } | Where-Object { $_ -in 'primary', 'standby' })
+        if ($hasFrontDoor) {
+            Add-Edge 'browser' "fd_$key" 'public' 'HTTPS' "public address of $($app.name)" $false
+            if ($roles -contains 'primary') { Add-Edge "fd_$key" "app_${key}_primary" 'origin' 'origin, priority 1' 'HTTPS' $true 1 }
+            if ($roles -contains 'standby') { Add-Edge "fd_$key" "app_${key}_standby" 'origin' 'origin, priority 2' 'HTTPS' $true 2 }
+        }
+        else {
+            foreach ($role in $roles) { Add-Edge 'browser' "app_${key}_$role" 'public' 'HTTPS' "the web app's own address" $false }
+        }
+    }
+    foreach ($app in $apps) {
+        $key = Get-DeployableAlias $app.name
+        foreach ($role in @($app.nodes | ForEach-Object { [string] $_.role } | Where-Object { $_ -in 'primary', 'standby' })) {
+            Add-Edge "app_${key}_$role" 'sqldb' 'sql' 'reads and writes' 'TCP 1433' $true
+        }
+    }
+    foreach ($static in $statics) {
+        Add-Edge 'browser' "swa_$(Get-DeployableAlias $static.name)" 'dashboard' 'loads the dashboard' 'HTTPS' $false
+    }
+    $lines.AddRange($edgeLines)
+    $lines.Add('@enduml')
+
+    return [ordered] @{
+        puml     = ($lines -join "`n") + "`n"
+        manifest = [ordered] @{
+            environment = $Environment
+            svg         = "$Environment.svg"
+            nodes       = @($nodes)
+            regions     = @($regionManifest)
+            edges       = @($edges)
+        }
+    }
+}
+
+function Test-RuntimeSvg {
+    # The handles the dashboard relies on, in an SVG PlantUML rendered: one <g class="entity"> per node (with its slot
+    # image), one <g class="cluster"> per region and one <g class="link"> per relationship, by the manifest. They are not a documented contract of PlantUML (they changed in 1.2026.3 and 1.2026.4), so every render
+    # is checked. Returns what is missing, as text; nothing when all is there.
+    param(
+        [Parameter(Mandatory)] [string] $Svg,
+        [Parameter(Mandatory)] [System.Collections.IDictionary] $Manifest
+    )
+    $document = [xml] $Svg
+    $entities = @{}
+    foreach ($group in @($document.SelectNodes("//*[local-name()='g'][@class='entity'][@data-qualified-name]"))) {
+        $entities[$group.GetAttribute('data-qualified-name')] = @($group.SelectNodes("./*[local-name()='image']")).Count
+    }
+    $clusters = @($document.SelectNodes("//*[local-name()='g'][@class='cluster'][@data-qualified-name]") | ForEach-Object { $_.GetAttribute('data-qualified-name') })
+    # A relationship is a <g class="link"> whose data-entity-1 and data-entity-2 are the ids of the two elements' groups
+    # (PlantUML's own layout engine, smetana, gives the <path> no id; Graphviz names it "<from>-to-<to>" too).
+    $aliasById = @{}
+    foreach ($group in @($document.SelectNodes("//*[local-name()='g'][@data-qualified-name][@id]"))) {
+        $aliasById[$group.GetAttribute('id')] = ($group.GetAttribute('data-qualified-name') -split '\.')[-1]
+    }
+    $paths = @(foreach ($link in @($document.SelectNodes("//*[local-name()='g'][@class='link']"))) {
+            $from = $aliasById[$link.GetAttribute('data-entity-1')]
+            $to = $aliasById[$link.GetAttribute('data-entity-2')]
+            if ($from -and $to) { "$from-to-$to" }
+        })
+    $missing = [Collections.Generic.List[string]]::new()
+    foreach ($node in $Manifest.nodes) {
+        if (-not $entities.ContainsKey($node.qualifiedName)) { $missing.Add("node $($node.qualifiedName)") }
+        elseif ($node.kind -ne 'person' -and $entities[$node.qualifiedName] -lt 1) { $missing.Add("slot of $($node.qualifiedName)") }
+    }
+    foreach ($region in $Manifest.regions) {
+        if ($clusters -notcontains $region.qualifiedName) { $missing.Add("region $($region.qualifiedName)") }
+    }
+    foreach ($edge in $Manifest.edges) {
+        if ($paths -notcontains $edge.id) { $missing.Add("relationship $($edge.id)") }
+    }
+    return @($missing)
+}
+
+function Get-PlantUmlJar {
+    # The PlantUML release jar of the pinned version, from the project's GitHub releases, into the folder; it fails when
+    # its SHA-256 is not the pinned one. Returns the path and the seconds the download took.
+    param(
+        [Parameter(Mandatory)] [string] $Version,
+        [Parameter(Mandatory)] [string] $Sha256,
+        [Parameter(Mandatory)] [string] $Folder
+    )
+    $path = Join-Path $Folder "plantuml-$Version.jar"
+    $clock = [Diagnostics.Stopwatch]::StartNew()
+    Invoke-WebRequest -Uri "https://github.com/plantuml/plantuml/releases/download/v$Version/plantuml-$Version.jar" -OutFile $path -TimeoutSec 300
+    $seconds = $clock.Elapsed.TotalSeconds
+    $actual = (Get-FileHash -LiteralPath $path -Algorithm SHA256).Hash
+    if ($actual -ne $Sha256) {
+        Remove-Item -LiteralPath $path -Force
+        throw "plantuml-$Version.jar from GitHub has SHA-256 $actual, not the pinned $($Sha256.ToUpperInvariant()): it was not used."
+    }
+    return [ordered] @{ path = $path; seconds = $seconds; megabytes = (Get-Item -LiteralPath $path).Length / 1MB }
+}
+
+function Write-RuntimeDiagram {
+    # runtime/ in the site folder: per environment of system.json the PlantUML source (<env>.puml), the SVG
+    # (<env>.svg) and its manifest (<env>.json), and index.json, the list the dashboard starts from. One Java process
+    # renders every diagram (PlantUML's own layout engine, smetana: no Graphviz), in PlantUML's most restrictive
+    # security profile: the source includes nothing but the C4 library inside the jar. Every SVG is checked for the
+    # handles of its manifest (Test-RuntimeSvg). Java's and PlantUML's output is returned as information; a render
+    # that fails or lacks a handle throws, with that output in the message. Returns the log lines and the timings.
+    param(
+        [Parameter(Mandatory)] [hashtable] $System,
+        [Parameter(Mandatory)] [System.Collections.IDictionary] $Topology,
+        [Parameter(Mandatory)] [string] $Folder,
+        [Parameter(Mandatory)] [string] $Jar,
+        [Parameter(Mandatory)] [string] $Version,
+        [hashtable] $DashboardUrl = @{}
+    )
+    # The package carries the sample's runtime/ (and so may an older release): none of it may outlive this deployment.
+    $runtime = Join-Path $Folder 'runtime'
+    if (Test-Path -LiteralPath $runtime) { Remove-Item -LiteralPath $runtime -Recurse -Force }
+    New-Item -ItemType Directory -Path $runtime | Out-Null
+    $diagrams = [ordered] @{}
+    foreach ($environment in @($System.environments)) {
+        $name = [string] $environment.name
+        $diagram = ConvertTo-RuntimeDiagram -System $System -Topology $Topology -Environment $name -DashboardUrl $DashboardUrl
+        $diagram.manifest.generated = $Topology.generated
+        $diagram.manifest.plantuml = $Version
+        $diagrams[$name] = $diagram
+        Set-Content -LiteralPath (Join-Path $runtime "$name.puml") -Value $diagram.puml -Encoding utf8NoBOM -NoNewline
+    }
+
+    $clock = [Diagnostics.Stopwatch]::StartNew()
+    $sources = @($diagrams.Keys | ForEach-Object { Join-Path $runtime "$_.puml" })
+    $env:PLANTUML_SECURITY_PROFILE = 'SANDBOX'
+    $PSNativeCommandUseErrorActionPreference = $false
+    $output = @(java '-Djava.awt.headless=true' -jar $Jar -tsvg -charset UTF-8 -nometadata -failfast2 @sources 2>&1 | ForEach-Object { "$_".TrimEnd() } | Where-Object { $_ })
+    $code = $LASTEXITCODE
+    $PSNativeCommandUseErrorActionPreference = $true
+    $seconds = $clock.Elapsed.TotalSeconds
+    $log = @($output | ForEach-Object { "  java: $_" })
+    if ($code -ne 0) {
+        throw "PlantUML $Version ended with exit code $code while rendering $($sources.Count) runtime diagram(s).$([Environment]::NewLine)$($log -join [Environment]::NewLine)"
+    }
+
+    $problems = [Collections.Generic.List[string]]::new()
+    foreach ($name in $diagrams.Keys) {
+        $svgPath = Join-Path $runtime "$name.svg"
+        if (-not (Test-Path -LiteralPath $svgPath)) {
+            $problems.Add("${name}: no $name.svg")
+            continue
+        }
+        $missing = @(Test-RuntimeSvg -Svg (Get-Content -LiteralPath $svgPath -Raw) -Manifest $diagrams[$name].manifest)
+        if ($missing.Count -gt 0) { $problems.Add("${name}: $($missing -join ', ')") }
+        ($diagrams[$name].manifest | ConvertTo-Json -Depth 10) + "`n" | Set-Content -LiteralPath (Join-Path $runtime "$name.json") -Encoding utf8NoBOM -NoNewline
+    }
+    if ($problems.Count -gt 0) {
+        throw "The runtime diagrams PlantUML $Version rendered lack elements the dashboard finds by name (the SVG's data-qualified-name and path ids are not a documented contract of PlantUML; pin a version that has them): $($problems -join '; ').$([Environment]::NewLine)$($log -join [Environment]::NewLine)"
+    }
+    $index = [ordered] @{
+        generated    = $Topology.generated
+        plantuml     = $Version
+        environments = @($diagrams.Keys | ForEach-Object { [ordered] @{ name = $_; manifest = "$_.json"; svg = "$_.svg" } })
+    }
+    ($index | ConvertTo-Json -Depth 5) + "`n" | Set-Content -LiteralPath (Join-Path $runtime 'index.json') -Encoding utf8NoBOM -NoNewline
+    $kilobytes = (@($diagrams.Keys | ForEach-Object { (Get-Item -LiteralPath (Join-Path $runtime "$_.svg")).Length }) | Measure-Object -Sum).Sum / 1KB
+    return [ordered] @{ log = $log; seconds = $seconds; count = $diagrams.Count; kilobytes = $kilobytes }
 }
 
 $environmentName = [string] $OctopusParameters['Octopus.Environment.Name']
@@ -201,6 +612,33 @@ else {
 }
 if (-not ($system['octopus'] -and $system.octopus['url'] -and $system.octopus['spaceId'])) {
     Write-Host 'system.json names no Octopus address and space (octopus.url, octopus.spaceId): the dashboard links to no Octopus project.'
+}
+
+# The runtime diagrams, next to topology.json: one C4 deployment view per environment, rendered here (the browser has
+# no PlantUML) by the jar of the pinned version, on the worker's Java. The time each part takes is logged: it is paid
+# by every deployment of the dashboard.
+if (-not (Get-Command java -ErrorAction SilentlyContinue)) {
+    Fail-Step "The worker container has no java, which renders the dashboard's runtime diagrams with PlantUML ${plantUmlVersion}: use a worker-tools image with a Java runtime (octopus/main.tf, worker_tools_image)."
+}
+$javaVersion = "$(@(java -version 2>&1)[0])".Trim()
+$tools = Join-Path ([IO.Path]::GetTempPath()) "plantuml-$([Guid]::NewGuid().ToString('N'))"
+New-Item -ItemType Directory -Path $tools | Out-Null
+$runtimeProblem = $null
+try {
+    $jar = Get-PlantUmlJar -Version $plantUmlVersion -Sha256 $plantUmlSha256 -Folder $tools
+    Write-Host ('PlantUML {0} downloaded from GitHub in {1:0.0} s ({2:0.0} MB, SHA-256 as pinned); {3}' -f $plantUmlVersion, $jar.seconds, $jar.megabytes, $javaVersion)
+    $rendered = Write-RuntimeDiagram -System $system -Topology $topology -Folder $folder -Jar $jar.path -Version $plantUmlVersion -DashboardUrl @{ $environmentName = $url }
+    $rendered.log | ForEach-Object { Write-Host $_ }
+    Write-Host ('runtime/: {0} diagram(s) rendered and checked in {1:0.0} s ({2:0} KB of SVG)' -f $rendered.count, $rendered.seconds, $rendered.kilobytes)
+}
+catch {
+    $runtimeProblem = $_.Exception.Message
+}
+finally {
+    Remove-Item -LiteralPath $tools -Recurse -Force -ErrorAction SilentlyContinue
+}
+if ($runtimeProblem) {
+    Fail-Step "The dashboard's runtime diagrams could not be made: $runtimeProblem"
 }
 
 # The deployment token of the site: read now, kept in this variable only, handed to the CLI through its environment
