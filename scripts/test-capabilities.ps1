@@ -436,6 +436,7 @@ $checks = [ordered] @{
         # deployment wrote, and in every environment it runs in, that topology lists every environment of system.json
         # and, for each App Service deployable, the nodes the naming convention gives (primary, and standby where the
         # environment has a standbyLocation). A topology older than system.json fails: deploy the dashboard again.
+        # Its Runtime view has, in runtime/index.json, every environment with a manifest and an SVG the site serves.
         $dashboard = @($system.deployables | Where-Object { $_['hosting'] -eq 'staticwebapp' }) | Select-Object -First 1
         if (-not $dashboard) { Skip-Check 'no deployable with hosting staticwebapp yet' }
         $dashboardName = [string] $dashboard.name
@@ -458,10 +459,22 @@ $checks = [ordered] @{
             $got = @(foreach ($entry in $listed) { foreach ($d in @($entry['deployables'] | Where-Object { $_ })) { foreach ($node in @($d['nodes'] | Where-Object { $_ })) { "$($entry['name'])/$($d['name'])/$($node['name'])" } } })
             $lost = @($want | Where-Object { $got -notcontains $_ })
             Assert-That ($lost.Count -eq 0) "the dashboard in $e does not list the node(s) $($lost -join ', '): deploy the release of $slug-$dashboardName to $e again"
+            $content = (Invoke-WebRequest -Uri "$url/runtime/index.json" -TimeoutSec 120 -SkipHttpErrorCheck)
+            Assert-That ($content.StatusCode -eq 200) "the dashboard in $e has no runtime/index.json (HTTP $($content.StatusCode)): deploy the release of $slug-$dashboardName to $e again"
+            $index = $(if ($content.Content -is [byte[]]) { [Text.Encoding]::UTF8.GetString($content.Content) } else { [string] $content.Content }) | ConvertFrom-Json -AsHashtable
+            $drawn = @($index['environments'] | Where-Object { $_ })
+            $undrawn = @($environments | Where-Object { @($drawn | ForEach-Object { [string] $_['name'] }) -notcontains $_ })
+            Assert-That ($undrawn.Count -eq 0) "the Runtime view in $e has no diagram of $($undrawn -join ', '): deploy the release of $slug-$dashboardName to $e again"
+            foreach ($entry in $drawn) {
+                foreach ($file in @([string] $entry['manifest'], [string] $entry['svg'])) {
+                    $answer = Invoke-WebRequest -Uri "$url/runtime/$file" -TimeoutSec 120 -SkipHttpErrorCheck
+                    Assert-That ($answer.StatusCode -eq 200 -and $answer.RawContentLength -gt 0) "the Runtime view in $e does not serve runtime/$file (HTTP $($answer.StatusCode))"
+                }
+            }
             "$e $url"
         }
         if (-not $shown) { Skip-Check "no successful $slug-$dashboardName deployment yet" }
-        "$($environments.Count) environment(s) and $($want.Count) node(s) on one page: $($shown -join '; ')"
+        "$($environments.Count) environment(s) and $($want.Count) node(s) on one page, with a runtime diagram each: $($shown -join '; ')"
     }
     'CAP-076' = {
         # The delivery tool shows each environment's health: a "Health report" run of the last three hours succeeded
