@@ -1,0 +1,55 @@
+@startuml 05-uat-environment
+!include _c4.iuml
+title CM demo 2 multi-region | Progression: uat added and promoted (2026-10-05)
+
+Person(viewer, "Class audience", "Browser")
+
+Boundary(gh, "GitHub org clearmeasure-aisf-sample-apps") {
+  Container(sysrepo, "cmdemo2-system", "system repository", "system.json lists tdd, uat; environments/uat/versions.json", $tags="new")
+  Container(apprepo, "cmdemo2-workorders", "app repository", "Build, then Release, for every green master")
+}
+
+Boundary(octo, "Octopus space cmdemo2 demo") {
+  Container(lifecycle, "cmdemo2-lifecycle", "lifecycle", "tdd (automatic), then uat (promotion, after a recorded sign-off)", $tags="new")
+  Container(proj_sys, "cmdemo2-system", "project", "tdd 1.0.11, uat 1.0.11", $tags="new")
+  Container(proj_app, "cmdemo2-ui", "project", "tdd 2.4.7, uat 2.4.7", $tags="new")
+}
+
+Boundary(rgn, "rg-cmdemo2-nonprod") {
+  Container(id_dn, "id-cmdemo2-deploy-nonprod", "managed identity", "Deploys tdd and uat")
+  Boundary(tdd, "stack-cmdemo2-tdd") {
+    Container(tdd_app, "app-cmdemo2-tdd-ui", "App Service web app", "https://app-cmdemo2-tdd-ui.azurewebsites.net")
+    Container(plan, "asp-cmdemo2-tdd", "App Service plan", "Free (F1), Linux, westus3; the tier's one plan: tdd and uat run on it")
+    ContainerDb(tdd_sql, "sql-cmdemo2-tdd-7ihwh / sqldb-cmdemo2-tdd", "Azure SQL, centralus")
+  }
+  Boundary(uat, "stack-cmdemo2-uat") {
+    Container(uat_app, "app-cmdemo2-uat-ui", "App Service web app", "https://app-cmdemo2-uat-ui.azurewebsites.net", $tags="new")
+    Container(uat_standby, "app-cmdemo2-uat-ui-eastus2", "App Service web app, standby in eastus2", "Same identity, same database; https://app-cmdemo2-uat-ui-eastus2.azurewebsites.net", $tags="new")
+    Container(uat_standby_plan, "asp-cmdemo2-uat-eastus2", "App Service plan", "Free (F1), Linux, eastus2", $tags="new")
+    ContainerDb(uat_sql, "sql-cmdemo2-uat-ew4mz / sqldb-cmdemo2-uat", "Azure SQL, centralus", $tags="new")
+    ContainerDb(uat_kv, "kvcmdemo2uatlbzty", "Key Vault", $tags="new")
+  }
+}
+
+Boundary(edge, "rg-cmdemo2-edge") {
+  Container(afd, "afd-cmdemo2", "Azure Front Door profile, Standard", "One for the whole system; an endpoint per environment")
+  Boundary(uat_edge, "stack-cmdemo2-uat-edge (deny write and delete)") {
+    Container(uat_fd, "cmdemo2-uat-ui", "Front Door endpoint, origin group, route", "https://cmdemo2-uat-ui-gjfyh5dcf2e2aagg.z02.azurefd.net; probes /alive on every origin every 30 seconds", $tags="new")
+  }
+}
+
+Rel(sysrepo, lifecycle, "pull request merged: octopus-apply adds uat", $tags="new")
+Rel(proj_sys, id_dn, "promote to uat: Sign-off, Apply environment", "Octopus OIDC", $tags="new")
+Rel(id_dn, uat, "az stack group create", $tags="new")
+Rel(proj_app, uat_app, "promote to uat: Sign-off, Pin, Migrate, Seed demo employees, Update (zip deploy), Verify", $tags="new")
+Rel(proj_app, tdd_app, "deployed earlier")
+Rel(uat_app, plan, "runs on", $tags="new")
+Rel(proj_app, uat_standby, "Update: the standby first, then the primary; both verified", $tags="new")
+Rel(uat_standby, uat_standby_plan, "runs on", $tags="new")
+Rel(id_dn, uat_edge, "az stack group create: the endpoint", $tags="new")
+Rel(viewer, uat_fd, "HTTPS", $tags="new")
+Rel(uat_fd, uat_app, "origin primary, priority 1", $tags="new")
+Rel(uat_fd, uat_standby, "origin standby, priority 2: serves when the primary stops answering", $tags="new")
+
+SHOW_LEGEND()
+@enduml
