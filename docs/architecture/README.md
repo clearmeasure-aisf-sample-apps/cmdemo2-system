@@ -52,6 +52,12 @@ Source: [04a-app-in-tdd.puml](04a-app-in-tdd.puml)
 
 Source: [05-uat-environment.puml](05-uat-environment.puml)
 
+## Progression: prod added and promoted (2026-10-05)
+
+![Progression: prod added and promoted (2026-10-05)](06-prod-environment.png)
+
+Source: [06-prod-environment.puml](06-prod-environment.puml)
+
 ## Public address: Front Door in front of tdd (2026-10-04)
 
 ![Public address: Front Door in front of tdd (2026-10-04)](12-public-address.png)

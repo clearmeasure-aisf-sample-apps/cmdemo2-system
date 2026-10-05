@@ -1,0 +1,57 @@
+@startuml 06-prod-environment
+!include _c4.iuml
+title CM demo 2 multi-region | Progression: prod added and promoted (2026-10-05)
+
+Person(viewer, "Class audience", "Browser")
+
+Boundary(gh, "GitHub org clearmeasure-aisf-sample-apps") {
+  Container(sysrepo, "cmdemo2-system", "system repository", "system.json lists tdd, uat, prod; environments/prod/versions.json", $tags="new")
+}
+
+Boundary(octo, "Octopus space cmdemo2 demo") {
+  Container(lifecycle, "cmdemo2-lifecycle", "lifecycle", "tdd (automatic), uat, then prod (promotions, each after a recorded sign-off)", $tags="new")
+  Container(acct_prod, "azure-cmdemo2-prod", "Azure OIDC account", "Prod environments only", $tags="new")
+  Container(proj_sys, "cmdemo2-system", "project", "tdd 1.0.11, uat 1.0.11, prod 1.0.11", $tags="new")
+  Container(proj_app, "cmdemo2-ui", "project", "tdd 2.4.7, uat 2.4.7, prod 2.4.7", $tags="new")
+  ContainerDb(feed, "Built-in feed", "Octopus packages", "cmdemo2-ui.2.4.7.zip: the package that ran in tdd and uat")
+}
+
+Boundary(rgn, "rg-cmdemo2-nonprod") {
+  Container(nonprod_apps, "tdd and uat", "stacks stack-cmdemo2-tdd, stack-cmdemo2-uat", "app-cmdemo2-tdd-ui.azurewebsites.net, app-cmdemo2-uat-ui.azurewebsites.net")
+}
+
+Boundary(rgp, "rg-cmdemo2-prod") {
+  Container(id_dp, "id-cmdemo2-deploy-prod", "managed identity", "Owner of rg-cmdemo2-prod; Octopus OIDC subjects for prod only")
+  Boundary(prod, "stack-cmdemo2-prod (deny write and delete)") {
+    Container(prod_app, "app-cmdemo2-prod-ui", "App Service web app", "https://app-cmdemo2-prod-ui.azurewebsites.net", $tags="new")
+    Container(prod_plan, "asp-cmdemo2-prod", "App Service plan", "Free (F1), Linux, westus3; the prod tier's own", $tags="new")
+    Container(prod_standby, "app-cmdemo2-prod-ui-eastus2", "App Service web app, standby in eastus2", "Same identity, same database; https://app-cmdemo2-prod-ui-eastus2.azurewebsites.net", $tags="new")
+    Container(prod_standby_plan, "asp-cmdemo2-prod-eastus2", "App Service plan", "Free (F1), Linux, eastus2", $tags="new")
+    ContainerDb(prod_sql, "sql-cmdemo2-prod-njryb / sqldb-cmdemo2-prod", "Azure SQL, centralus", $tags="new")
+    ContainerDb(prod_kv, "kvcmdemo2prodn3cwu", "Key Vault", $tags="new")
+  }
+}
+
+Boundary(edge, "rg-cmdemo2-edge") {
+  Container(afd, "afd-cmdemo2", "Azure Front Door profile, Standard", "One for the whole system; an endpoint per environment")
+  Boundary(prod_edge, "stack-cmdemo2-prod-edge (deny write and delete)") {
+    Container(prod_fd, "cmdemo2-prod-ui", "Front Door endpoint, origin group, route", "https://cmdemo2-prod-ui-a2b5hkfrchg3ckew.z02.azurefd.net; probes /alive on every origin every 30 seconds", $tags="new")
+  }
+}
+
+Rel(sysrepo, lifecycle, "pull request merged: octopus-apply adds prod", $tags="new")
+Rel(proj_sys, acct_prod, "promote to prod: Sign-off, Apply environment", $tags="new")
+Rel(acct_prod, id_dp, "Octopus OIDC", $tags="new")
+Rel(id_dp, prod, "az stack group create", $tags="new")
+Rel(proj_app, feed, "the release's zip: built once, no image and no registry")
+Rel(proj_app, prod_app, "promote to prod: Sign-off, Record restore point, Pin, Migrate, Seed demo employees, Update (zip deploy), Verify", $tags="new")
+Rel(prod_app, prod_plan, "runs on", $tags="new")
+Rel(proj_app, prod_standby, "Update: the standby first, then the primary; both verified", $tags="new")
+Rel(prod_standby, prod_standby_plan, "runs on", $tags="new")
+Rel(id_dp, prod_edge, "az stack group create: the endpoint", $tags="new")
+Rel(viewer, prod_fd, "HTTPS", $tags="new")
+Rel(prod_fd, prod_app, "origin primary, priority 1", $tags="new")
+Rel(prod_fd, prod_standby, "origin standby, priority 2: serves when the primary stops answering", $tags="new")
+
+SHOW_LEGEND()
+@enduml
