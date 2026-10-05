@@ -40,6 +40,12 @@ Source: [03a-tdd-environment.puml](03a-tdd-environment.puml)
 
 Source: [04-app-repository.puml](04-app-repository.puml)
 
+## Phase 4a: app 2.4.6 running in tdd (2026-10-04)
+
+![Phase 4a: app 2.4.6 running in tdd (2026-10-04)](04a-app-in-tdd.png)
+
+Source: [04a-app-in-tdd.puml](04a-app-in-tdd.puml)
+
 ## Public address: Front Door in front of tdd (2026-10-04)
 
 ![Public address: Front Door in front of tdd (2026-10-04)](12-public-address.png)
