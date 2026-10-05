@@ -110,7 +110,8 @@
       "tier": "nonprod",
       "capabilities": [
         "baseline",
-        "frontdoor"
+        "frontdoor",
+        "telemetry"
       ],
       "acceptanceTests": true
     },
