@@ -1,0 +1,39 @@
+@startuml 04a-app-in-tdd
+!include _c4.iuml
+title CM demo 2 multi-region | Phase 4a: app 2.4.6 running in tdd (2026-10-04)
+
+Person(viewer, "Class audience", "Browser")
+
+Boundary(gh, "GitHub org clearmeasure-aisf-sample-apps") {
+  Container(apprepo, "cmdemo2-workorders", "app repository", "Build, then Release, for every green master")
+  Container(sysrepo, "cmdemo2-system", "system repository", "environments/tdd/versions.json: ui = 2.4.6 (commit a707b54)", $tags="new")
+}
+
+Boundary(octo, "Octopus space cmdemo2 demo") {
+  ContainerDb(feed, "Built-in feed", "Octopus packages", "cmdemo2-ui.2.4.6.zip, ChurchBulletin.Database 2.4.6, ChurchBulletin.AcceptanceTests 2.4.6", $tags="new")
+  Container(rel_app, "cmdemo2-ui 2.4.6", "release", "Deployed to tdd", $tags="new")
+  Container(worker, "Hosted Ubuntu worker", "worker-tools container", "Runs the deployment steps", $tags="new")
+}
+
+Boundary(rgn, "rg-cmdemo2-nonprod") {
+  Container(id_dn, "id-cmdemo2-deploy-nonprod", "managed identity", "Octopus OIDC account azure-cmdemo2-nonprod")
+  Boundary(stack, "stack-cmdemo2-tdd") {
+    Container(app, "app-cmdemo2-tdd-ui", "App Service web app on asp-cmdemo2-tdd, Free (F1)", "Zip 2.4.6; https://app-cmdemo2-tdd-ui.azurewebsites.net/_healthcheck answers 200", $tags="new")
+    ContainerDb(sql, "sql-cmdemo2-tdd-7ihwh / sqldb-cmdemo2-tdd", "Azure SQL, centralus", "Schema migrated to 2.4.6", $tags="new")
+    ContainerDb(kv, "kvcmdemo2tddptgq3", "Key Vault")
+  }
+}
+
+Rel(apprepo, feed, "Release: push zip, database and acceptance-test packages", "OIDC", $tags="new")
+Rel(apprepo, rel_app, "Release: create release", "OIDC", $tags="new")
+Rel(rel_app, worker, "deploy", $tags="new")
+Rel(worker, sysrepo, "1. Pin version (5. Revert pin, only when a step failed)", "GitHub contents API, OCTOPUS_GITHUB_TOKEN", $tags="new")
+Rel(worker, sql, "2. Migrate database", "SQL admin login from the vault", $tags="new")
+Rel(worker, id_dn, "3. Update deployable", "Octopus OIDC", $tags="new")
+Rel(id_dn, app, "az webapp deploy: the release's zip; sets the startup command", $tags="new")
+Rel(worker, app, "4. Verify deployable", "/_healthcheck; fails at once when the plan's quota stopped the site", $tags="new")
+Rel(app, kv, "connection string of login ui", "identity id-cmdemo2-tdd-ui")
+Rel(viewer, app, "HTTPS")
+
+SHOW_LEGEND()
+@enduml
