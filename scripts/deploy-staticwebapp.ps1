@@ -118,6 +118,10 @@ function ConvertTo-Topology {
                         healthPath  = if ($app['healthPath']) { [string] $app.healthPath } else { '/_healthcheck' }
                         alivePath   = '/alive'
                         versionPath = '/_version'
+                        # The app's own count of its calls (deployables[].telemetryPath), and what the traffic button
+                        # calls (deployables[].trafficPaths): null without them, so an app without the endpoint shows dashes.
+                        telemetryPath = if ($app['telemetryPath']) { [string] $app.telemetryPath } else { $null }
+                        trafficPaths  = if ($app['trafficPaths']) { , @($app.trafficPaths | ForEach-Object { [string] $_ }) } else { $null }
                         nodes       = $nodes
                     }
                 })
@@ -244,7 +248,7 @@ function ConvertTo-RuntimeDiagram {
 
     # Slots: the room for a tile, a region's label and a number line of a relationship (pixels; the dashboard's
     # runtime.js draws into them and assumes nothing about their size but what the SVG says).
-    $tileSlot = "<img:$(New-TransparentPng -Width 250 -Height 98)>"
+    $tileSlot = "<img:$(New-TransparentPng -Width 250 -Height 113)>"
     $smallTileSlot = "<img:$(New-TransparentPng -Width 250 -Height 46)>"
     $regionSlot = "<img:$(New-TransparentPng -Width 190 -Height 22)>"
     $edgeSlot = "<img:$(New-TransparentPng -Width 160 -Height 34)>"
@@ -374,12 +378,12 @@ function ConvertTo-RuntimeDiagram {
         $key = Get-DeployableAlias $app.name
         $roles = @($app.nodes | ForEach-Object { [string] $_.role } | Where-Object { $_ -in 'primary', 'standby' })
         if ($hasFrontDoor) {
-            Add-Edge 'browser' "fd_$key" 'public' 'HTTPS' "public address of $($app.name)" $false
+            Add-Edge 'browser' "fd_$key" 'public' 'HTTPS' "public address of $($app.name)" $true
             if ($roles -contains 'primary') { Add-Edge "fd_$key" "app_${key}_primary" 'origin' 'origin, priority 1' 'HTTPS' $true 1 }
             if ($roles -contains 'standby') { Add-Edge "fd_$key" "app_${key}_standby" 'origin' 'origin, priority 2' 'HTTPS' $true 2 }
         }
         else {
-            foreach ($role in $roles) { Add-Edge 'browser' "app_${key}_$role" 'public' 'HTTPS' "the web app's own address" $false }
+            foreach ($role in $roles) { Add-Edge 'browser' "app_${key}_$role" 'public' 'HTTPS' "the web app's own address" $true }
         }
     }
     foreach ($app in $apps) {

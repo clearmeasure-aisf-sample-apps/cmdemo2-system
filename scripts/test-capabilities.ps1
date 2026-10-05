@@ -490,6 +490,28 @@ $checks = [ordered] @{
         }
         "the last hourly health report succeeded in $($shown -join ', ') (UTC)"
     }
+    'CAP-077' = {
+        # Calls are counted where they happen: every web app of an App Service deployable with a telemetryPath (primary
+        # and standby, every environment) answers it with its counts of the last minute, readable from any origin, so
+        # the dashboard's runtime view shows calls per minute on Front Door's routes and the database's.
+        $counted = @($system.deployables | Where-Object { $_['hosting'] -eq 'appservice' -and $_['telemetryPath'] })
+        if ($counted.Count -eq 0) { Skip-Check 'no App Service deployable has a telemetryPath in system.json' }
+        $shown = foreach ($app in $counted) {
+            foreach ($entry in $system.environments) {
+                $names = @("app-$slug-$($entry.name)-$($app.name)")
+                if ($entry['standbyLocation']) { $names += "app-$slug-$($entry.name)-$($app.name)-$($entry.standbyLocation)" }
+                foreach ($name in $names) {
+                    $answer = Invoke-WebRequest -Uri "https://$name.azurewebsites.net$($app.telemetryPath)" -Headers @{ Origin = 'https://capability-check.example' } -TimeoutSec 120 -SkipHttpErrorCheck
+                    Assert-That ($answer.StatusCode -eq 200) "$name answers $($app.telemetryPath) with HTTP $($answer.StatusCode): deploy a release of $slug-$($app.name) that has the endpoint"
+                    Assert-That ("$($answer.Headers['Access-Control-Allow-Origin'])" -eq '*') "$name does not allow other origins to read $($app.telemetryPath)"
+                    $counts = $(if ($answer.Content -is [byte[]]) { [Text.Encoding]::UTF8.GetString($answer.Content) } else { [string] $answer.Content }) | ConvertFrom-Json -AsHashtable
+                    Assert-That ($counts['requests'] -is [hashtable] -and $null -ne $counts.requests['perMinute'] -and $counts['sql'] -is [hashtable]) "$name answers $($app.telemetryPath) without the counts of requests and SQL commands"
+                    "$name $($counts.requests.perMinute) req/min, $($counts.sql.perMinute) SQL/min"
+                }
+            }
+        }
+        "every web app counts its calls: $($shown -join '; ')"
+    }
     'CAP-080' = { $files = @(gh api "repos/$systemRepo/contents/docs/architecture" --jq '.[].name'); $missing = @($files | Where-Object { $_ -like '*.puml' -and $files -notcontains ($_ -replace '\.puml$', '.png') }); Assert-That ($missing.Count -eq 0 -and $files.Count -gt 0) "not rendered: $missing"; "$(@($files | Where-Object { $_ -like '*.png' }).Count) diagrams rendered" }
     'CAP-081' = {
         $build = Get-RepoFile $systemRepo '.github/workflows/system.yml'; $nightly = Get-RepoFile $systemRepo '.github/workflows/capabilities.yml'
