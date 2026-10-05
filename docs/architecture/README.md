@@ -51,3 +51,9 @@ Source: [04a-app-in-tdd.puml](04a-app-in-tdd.puml)
 ![Public address: Front Door in front of tdd (2026-10-04)](12-public-address.png)
 
 Source: [12-public-address.puml](12-public-address.puml)
+
+## A dashboard of every node (2026-10-04)
+
+![A dashboard of every node (2026-10-04)](13-dashboard.png)
+
+Source: [13-dashboard.puml](13-dashboard.puml)

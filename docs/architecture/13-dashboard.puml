@@ -1,0 +1,42 @@
+@startuml 13-dashboard
+!include _c4.iuml
+title CM demo 2 multi-region | A dashboard of every node (2026-10-04)
+
+Person(viewer, "Class audience", "Browser: the page's code runs here")
+
+Boundary(gh, "GitHub org clearmeasure-aisf-sample-apps") {
+  Container(dashrepo, "cmdemo2-dashboard", "dashboard repository", "A static page (Blazor WebAssembly); Build, then Release: a zip of the site. No registry, no Azure credentials", $tags="new")
+  Container(sysrepo, "cmdemo2-system", "system repository", "system.json: deployable dashboard, hosting staticwebapp; environments/tdd/versions.json", $tags="new")
+}
+
+Boundary(octo, "Octopus space cmdemo2 demo") {
+  ContainerDb(feed, "Built-in feed", "Octopus packages", "cmdemo2-dashboard.1.0.1.zip", $tags="new")
+  Container(proj_dash, "cmdemo2-dashboard", "project", "1.0.1 in tdd: Sign-off (promoted environments), Pin version, Update deployable, Verify deployable, Revert pin", $tags="new")
+  Container(proj_sys, "cmdemo2-system", "project", "Apply environment: the Static Web App; every App Service app allows every origin (CORS *, no credentials)", $tags="new")
+}
+
+Boundary(rgn, "rg-cmdemo2-nonprod") {
+  Container(id_dn, "id-cmdemo2-deploy-nonprod", "managed identity", "The only reader of the site's deployment token")
+  Boundary(stack, "stack-cmdemo2-tdd (deny write and delete)") {
+    Container(swa, "swa-cmdemo2-tdd-dashboard", "Static Web App, Free", "https://calm-wave-0b8361f10.6.azurestaticapps.net: index.html and topology.json, served from edge locations", $tags="new")
+  }
+}
+
+Boundary(nodes, "Every environment of the system") {
+  Container(apps, "Web apps", "App Service, every app, primary and standby regions", "app-cmdemo2-tdd-ui, app-cmdemo2-uat-ui, app-cmdemo2-uat-ui-eastus2, app-cmdemo2-prod-ui, app-cmdemo2-prod-ui-eastus2")
+  Container(fds, "Front Door endpoints of afd-cmdemo2", "public addresses", "cmdemo2-tdd-ui-fqbpbvbgdcgsb8bv.z02.azurefd.net, cmdemo2-uat-ui-gjfyh5dcf2e2aagg.z02.azurefd.net, cmdemo2-prod-ui-a2b5hkfrchg3ckew.z02.azurefd.net")
+}
+
+Rel(dashrepo, feed, "Release: push zip", "OIDC", $tags="new")
+Rel(dashrepo, proj_dash, "Release: create release", "OIDC", $tags="new")
+Rel(proj_dash, sysrepo, "Pin version; reads system.json on main for the topology", $tags="new")
+Rel(proj_dash, id_dn, "Update deployable", "Octopus OIDC", $tags="new")
+Rel(id_dn, swa, "Static Web Apps CLI: the site and topology.json (every environment, every node)", "deployment token, read at run time", $tags="new")
+Rel(proj_sys, stack, "creates the site", $tags="new")
+Rel(viewer, swa, "HTTPS: the page and its topology", $tags="new")
+Rel(viewer, apps, "probes every node directly", "health and version; HTTPS, cross-origin", $tags="new")
+Rel(viewer, fds, "probes every endpoint", "which node answers; HTTPS, cross-origin", $tags="new")
+Rel(fds, apps, "origins")
+
+SHOW_LEGEND()
+@enduml
