@@ -130,7 +130,8 @@
       "tier": "prod",
       "capabilities": [
         "baseline",
-        "frontdoor"
+        "frontdoor",
+        "telemetry"
       ],
       "standbyLocation": "eastus2"
     }
