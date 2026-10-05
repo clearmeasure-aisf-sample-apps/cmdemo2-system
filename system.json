@@ -101,6 +101,12 @@
       "dataLoaderAssembly": "ClearMeasure.Bootcamp.IntegrationTests.dll",
       "acceptanceTestsFilter": "FullyQualifiedName~WarmUpTests|FullyQualifiedName~LandingPageTests|FullyQualifiedName~LogoutTests|FullyQualifiedName~WorkOrderSaveDraftTests|FullyQualifiedName~WorkOrderAssignTests|FullyQualifiedName~WorkOrderBeginTests|FullyQualifiedName~WorkOrderCompleteTests|FullyQualifiedName~WorkOrderCancelTests|FullyQualifiedName~WorkOrderShelvedTests",
       "acceptanceTestsWorkers": 2
+    },
+    {
+      "name": "dashboard",
+      "repository": "cmdemo2-dashboard",
+      "hosting": "staticwebapp",
+      "healthPath": "/"
     }
   ],
   "environments": [
