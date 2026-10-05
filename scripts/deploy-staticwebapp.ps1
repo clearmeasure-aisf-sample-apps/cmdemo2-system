@@ -18,6 +18,17 @@
        also gets the address of its Front Door endpoint, read from the system's profile (azure.frontDoor).
        Container-app deployables are left out: their address is not a convention (the platform generates it, and a
        placement changes it), so the dashboard does not show them.
+       The topology also says where the dashboard finds what the deployments pinned. Every address is a convention
+       over system.json and none is a secret:
+         system.repository      https://github.com/<system.githubOrg>/<system.repository>, the system repository
+         versionsUrl            per environment: environments/<env>/versions.json on main, as
+                                raw.githubusercontent.com serves it to a browser without a token (the repository is
+                                public)
+         versionsHistoryUrl     per environment: the commits of that file on github.com
+         projectUrl             per deployable: <octopus.url>/app#/<octopus.spaceId>/projects/<slug>-<deployable>,
+                                its Octopus project
+       The dashboard compares the pinned version with the version each node reports and links to the project and to
+       the history. An address whose parts system.json does not give is null, and the dashboard leaves that part out.
     2. The deployment, with the Static Web Apps CLI and the site's deployment token. The token is read from Azure
        when the step runs (the deploy identity may; the stack's deny settings keep everyone else from listing it),
        reaches the CLI through an environment variable, and is never stored, printed or passed as an argument.
@@ -26,7 +37,8 @@
     The topology is a picture of system.json at the time of the deployment. After a change to the environments, a
     standby region or a Front Door endpoint, deploy the dashboard's release again in every environment that has it:
     until then its page shows the old picture. An environment that is in system.json but not applied yet shows its
-    nodes as unreachable.
+    nodes as unreachable. The pinned versions are not part of the picture: the dashboard reads versions.json itself,
+    every time it checks the nodes.
 #>
 [CmdletBinding()]
 param()
@@ -49,6 +61,8 @@ $swaCliNodeVersion = 18
 function ConvertTo-Topology {
     # The dashboard's topology from system.json (parsed, as a hashtable) and the host name of each Front Door endpoint
     # by endpoint name (<slug>-<env>-<deployable>). It asks nothing: the same input gives the same topology.
+    # The addresses of the pinned versions and of the Octopus projects are conventions over system.json; one whose
+    # parts system.json lacks is null, which the dashboard reads as "not there".
     param(
         [Parameter(Mandatory)] [hashtable] $System,
         [hashtable] $EndpointHost = @{},
@@ -57,8 +71,16 @@ function ConvertTo-Topology {
     $slug = [string] $System.system.slug
     $location = [string] $System.system.location
     $apps = @($System.deployables | Where-Object { $_['hosting'] -eq 'appservice' })
+    $githubOrg = [string] $System.system['githubOrg']
+    $repositoryName = [string] $System.system['repository']
+    $repository = if ($githubOrg -and $repositoryName) { "$githubOrg/$repositoryName" } else { '' }
+    $octopus = if ($System['octopus']) { $System.octopus } else { @{} }
+    $octopusUrl = ([string] $octopus['url']).TrimEnd('/')
+    $spaceId = [string] $octopus['spaceId']
+    $projects = if ($octopusUrl -and $spaceId) { "$octopusUrl/app#/$spaceId/projects" } else { '' }
     $environments = @(foreach ($environment in @($System.environments)) {
             $environmentName = [string] $environment.name
+            $versionsPath = "main/environments/$environmentName/versions.json"
             $standbyLocation = [string] $environment['standbyLocation']
             $hasFrontDoor = @($environment['capabilities']) -contains 'frontdoor'
             $deployables = @(foreach ($app in $apps) {
@@ -71,6 +93,7 @@ function ConvertTo-Topology {
                     $hostName = [string] $EndpointHost["$slug-$environmentName-$($app.name)"]
                     [ordered] @{
                         name        = [string] $app.name
+                        projectUrl  = if ($projects) { "$projects/$slug-$($app.name)" } else { $null }
                         frontDoor   = if ($hasFrontDoor -and $hostName) { "https://$hostName" } else { $null }
                         healthPath  = if ($app['healthPath']) { [string] $app.healthPath } else { '/_healthcheck' }
                         alivePath   = '/alive'
@@ -78,10 +101,20 @@ function ConvertTo-Topology {
                         nodes       = $nodes
                     }
                 })
-            [ordered] @{ name = $environmentName; tier = [string] $environment['tier']; deployables = $deployables }
+            [ordered] @{
+                name               = $environmentName
+                tier               = [string] $environment['tier']
+                versionsUrl        = if ($repository) { "https://raw.githubusercontent.com/$repository/$versionsPath" } else { $null }
+                versionsHistoryUrl = if ($repository) { "https://github.com/$repository/commits/$versionsPath" } else { $null }
+                deployables        = $deployables
+            }
         })
     return [ordered] @{
-        system       = [ordered] @{ slug = $slug; name = [string] $System.system['name'] }
+        system       = [ordered] @{
+            slug       = $slug
+            name       = [string] $System.system['name']
+            repository = if ($repository) { "https://github.com/$repository" } else { $null }
+        }
         generated    = $Generated.ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ssZ', [Globalization.CultureInfo]::InvariantCulture)
         environments = $environments
     }
@@ -160,6 +193,15 @@ foreach ($environment in $topology.environments) {
 ($topology | ConvertTo-Json -Depth 10) + "`n" | Set-Content -LiteralPath (Join-Path $folder 'topology.json') -Encoding utf8NoBOM -NoNewline
 $summary = "$(@($topology.environments).Count) environment(s), $nodeCount node(s), $addressCount public address(es)"
 Write-Host "topology.json of $($topology.generated): $summary"
+if ($topology.system.repository) {
+    Write-Host "Pinned versions: the dashboard reads environments/<env>/versions.json on main of $($topology.system.repository) and compares it with what the nodes report."
+}
+else {
+    Write-Host 'system.json names no GitHub organization and repository (system.githubOrg, system.repository): the dashboard shows no pinned versions.'
+}
+if (-not ($system['octopus'] -and $system.octopus['url'] -and $system.octopus['spaceId'])) {
+    Write-Host 'system.json names no Octopus address and space (octopus.url, octopus.spaceId): the dashboard links to no Octopus project.'
+}
 
 # The deployment token of the site: read now, kept in this variable only, handed to the CLI through its environment
 # variable (never an argument, which a process list shows), and removed from the environment when the CLI has ended.
