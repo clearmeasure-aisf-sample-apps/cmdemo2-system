@@ -55,10 +55,11 @@ locals {
     for name, d in local.migrated_deployables : name => d
     if try(d.acceptanceTestsPackage, "") != "" && try(d.dataLoaderAssembly, "") != ""
   }
-  # Every environment after the first waits for a sign-off by the space's Space Managers (people join that team to
-  # sign off; automation answers only with a recorded reason). Prod-tier environments record a restore point first.
-  prod_environments = [for name, e in local.environments : name if e.tier == "prod"]
-  sign_off_team_id  = "teams-spacemanagers-${local.system.octopus.spaceId}"
+  # Every environment after the first waits for a sign-off by the team "<slug> approvers" (approvers.tf: the people in
+  # system.json octopus.approvers; automation answers only with a recorded reason). Prod-tier environments record a
+  # restore point first.
+  prod_environments    = [for name, e in local.environments : name if e.tier == "prod"]
+  nonprod_environments = [for name, e in local.environments : name if e.tier != "prod"]
   # Demo data: environments[].employeeMiddleNames ({ "<user name>": "<middle name>" }); the system step "Set employee
   # middle names" writes them to the environments that declare some.
   middle_name_environments = [for name, e in local.environments : name if length(try(e.employeeMiddleNames, {})) > 0]

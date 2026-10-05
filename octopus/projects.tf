@@ -33,6 +33,12 @@ resource "octopusdeploy_process" "system" {
 # Every environment but the first: the step excludes the first instead of naming the others, because a release keeps
 # the process as it was when the release was created. A release made before an environment existed then still stops
 # at the sign-off when it is promoted there.
+# Systems synced while the step had a count keep their step instead of losing it and getting a new one.
+moved {
+  from = octopusdeploy_process_step.system_sign_off[0]
+  to   = octopusdeploy_process_step.system_sign_off
+}
+
 resource "octopusdeploy_process_step" "system_sign_off" {
   process_id            = octopusdeploy_process.system.id
   name                  = "Sign-off"
@@ -173,15 +179,18 @@ resource "octopusdeploy_process_step" "sign_off" {
 }
 
 # Prod tier: the restore point of the database before the release changes anything (scripts/record-restore-point.ps1).
+# The step excludes the nonprod environments instead of naming the prod ones, and is in the process from the start: a
+# release keeps the process of its creation, so a release made before prod existed still records its restore point
+# there. (Such a release also records one in a nonprod environment added after it, which only adds a log line.)
 resource "octopusdeploy_process_step" "restore_point" {
-  for_each = length(local.prod_environments) > 0 ? local.migrated_deployables : {}
+  for_each = local.migrated_deployables
 
-  process_id     = octopusdeploy_process.deployable[each.key].id
-  name           = "Record restore point"
-  type           = "Octopus.AzurePowerShell"
-  environments   = [for name in local.prod_environments : octopusdeploy_environment.this[name].id]
-  worker_pool_id = local.worker_pool_id
-  container      = local.container
+  process_id            = octopusdeploy_process.deployable[each.key].id
+  name                  = "Record restore point"
+  type                  = "Octopus.AzurePowerShell"
+  excluded_environments = [for name in local.nonprod_environments : octopusdeploy_environment.this[name].id]
+  worker_pool_id        = local.worker_pool_id
+  container             = local.container
 
   execution_properties = {
     "Octopus.Action.Azure.AccountId"     = "#{Azure.Account}"

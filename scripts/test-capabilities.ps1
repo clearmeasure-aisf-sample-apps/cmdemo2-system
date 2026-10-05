@@ -247,9 +247,19 @@ $checks = [ordered] @{
     }
     'CAP-038' = {
         # The sign-off step is in the process from the start (it excludes the first environment), so a release made
-        # while the system had one environment still stops at it in every environment added later.
-        foreach ($slug in $systemProject, $deployableProject) { $s = @(Get-ProcessStep $slug)[0]; Assert-That ($s.Name -eq 'Sign-off' -and $s.Actions[0].ActionType -eq 'Octopus.Manual') "$slug does not start with Sign-off" }
-        Assert-That ((Get-RepoFile $systemRepo 'octopus/projects.tf') -match 'octopusdeploy_project_deployment_freeze') 'no freeze support'; 'Sign-off first in both projects; freezes from system.json'
+        # while the system had one environment still stops at it in every environment added later. Its responsible
+        # team is "<slug> approvers" (octopus/approvers.tf: the people of system.json octopus.approvers and the operator).
+        $teamName = "$slug approvers"
+        $team = @((Invoke-Octopus "/api/$space/teams?partialName=$([uri]::EscapeDataString($teamName))&take=100").Items | Where-Object { $_.Name -eq $teamName -and $_.SpaceId -eq $space }) | Select-Object -First 1
+        Assert-That ($null -ne $team) "no team '$teamName' in the space"
+        foreach ($project in $systemProject, $deployableProject) {
+            $s = @(Get-ProcessStep $project)[0]
+            Assert-That ($s.Name -eq 'Sign-off' -and $s.Actions[0].ActionType -eq 'Octopus.Manual') "$project does not start with Sign-off"
+            $responsible = $s.Actions[0].Properties.PSObject.Properties['Octopus.Action.Manual.ResponsibleTeamIds']
+            $responsibleIds = if ($responsible) { [string] $responsible.Value } else { '' }
+            Assert-That ($responsibleIds -eq $team.Id) "the Sign-off of $project is for '$responsibleIds', not for team '$teamName' ($($team.Id))"
+        }
+        Assert-That ((Get-RepoFile $systemRepo 'octopus/projects.tf') -match 'octopusdeploy_project_deployment_freeze') 'no freeze support'; "Sign-off first in both projects, for team '$teamName'; freezes from system.json"
     }
     'CAP-039' = {
         if ($onAppService) {
@@ -357,6 +367,20 @@ $checks = [ordered] @{
         "requests of $role arriving in Application Insights in $($on -join ', ')"
     }
     'CAP-071' = { $noisy = @(Get-NoisyDeployment); Assert-That ($noisy.Count -eq 0) "warnings in: $($noisy -join '; ')"; 'the logs of every current deployment are clean' }
+    'CAP-074' = {
+        # Metrics land where telemetry does: in every environment with the capability, metrics of the app under its own
+        # name (OTEL_SERVICE_NAME, <slug>-<deployable>) arrived in Application Insights in the last 30 days.
+        $on = @($system.environments | Where-Object { @($_.capabilities) -contains 'telemetry' } | ForEach-Object { [string] $_.name })
+        if ($on.Count -eq 0) { Skip-Check 'no environment has capability telemetry yet' }
+        $role = "$slug-$deployable"
+        foreach ($e in $on) {
+            $component = "/subscriptions/$($system.azure.subscriptionId)/resourceGroups/$(Get-Group $e)/providers/Microsoft.Insights/components/appi-$slug-$e"
+            $body = @{ query = "customMetrics | where cloud_RoleName == '$role' | summarize count()"; timespan = 'P30D' } | ConvertTo-Json -Compress
+            $count = [int] (az rest --method post --url "https://management.azure.com$component/query?api-version=2018-04-20" --body $body --query 'tables[0].rows[0][0]' --output tsv)
+            Assert-That ($count -gt 0) "no metrics of $role in appi-$slug-$e in 30 days"
+        }
+        "metrics of $role arriving in Application Insights in $($on -join ', ')"
+    }
     'CAP-075' = {
         # One page shows every node: the dashboard (the deployable with hosting "staticwebapp") serves the topology its
         # deployment wrote, and in every environment it runs in, that topology lists every environment of system.json
