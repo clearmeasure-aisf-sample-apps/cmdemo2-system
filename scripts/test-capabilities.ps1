@@ -463,6 +463,20 @@ $checks = [ordered] @{
         if (-not $shown) { Skip-Check "no successful $slug-$dashboardName deployment yet" }
         "$($environments.Count) environment(s) and $($want.Count) node(s) on one page: $($shown -join '; ')"
     }
+    'CAP-076' = {
+        # The delivery tool shows each environment's health: a "Health report" run of the last three hours succeeded
+        # in every environment (the runbook is hourly, and fails when a node does not answer).
+        $since = [datetimeoffset]::UtcNow.AddHours(-3)
+        $runs = @((Invoke-Octopus "/api/$space/tasks?name=RunbookRun&take=200").Items | Where-Object { $_.Description -like '*Health report*' -and [datetimeoffset] $_.QueueTime -gt $since })
+        if ($runs.Count -eq 0 -and (Get-SystemAge) -lt 0.125) { Skip-Check 'the system is younger than three hours: no health report is due yet' }
+        $shown = foreach ($e in $environments) {
+            $last = @($runs | Where-Object { $_.Description -like "* $e" -or $_.Description -like "* $e *" }) | Sort-Object { [datetimeoffset] $_.QueueTime } -Descending | Select-Object -First 1
+            Assert-That ($null -ne $last) "no Health report run in $e in three hours"
+            Assert-That ($last.State -eq 'Success') "the last Health report in $e is $($last.State)"
+            "$e $(([datetimeoffset] $last.QueueTime).ToString('HH:mm'))"
+        }
+        "the last hourly health report succeeded in $($shown -join ', ') (UTC)"
+    }
     'CAP-080' = { $files = @(gh api "repos/$systemRepo/contents/docs/architecture" --jq '.[].name'); $missing = @($files | Where-Object { $_ -like '*.puml' -and $files -notcontains ($_ -replace '\.puml$', '.png') }); Assert-That ($missing.Count -eq 0 -and $files.Count -gt 0) "not rendered: $missing"; "$(@($files | Where-Object { $_ -like '*.png' }).Count) diagrams rendered" }
     'CAP-081' = {
         $build = Get-RepoFile $systemRepo '.github/workflows/system.yml'; $nightly = Get-RepoFile $systemRepo '.github/workflows/capabilities.yml'
