@@ -1,0 +1,94 @@
+@startuml 20-dependencies
+!pragma layout smetana
+!include <C4/C4_Container>
+LAYOUT_LEFT_RIGHT()
+HIDE_STEREOTYPE()
+skinparam wrapWidth 230
+skinparam maxMessageSize 170
+skinparam nodesep 35
+skinparam ranksep 70
+title CM demo 2 multi-region (cmdemo2) | What depends on what: the system, its GitOps repositories and its DevOps pipeline (2026-10-06)
+
+AddElementTag("git", $bgColor="#24292f", $fontColor="#ffffff", $borderColor="#000000", $legendText="Git repository (GitHub)")
+AddElementTag("pipe", $bgColor="#0d80d8", $fontColor="#ffffff", $borderColor="#0a5ea0", $legendText="Pipeline: GitHub Actions workflow or Octopus project")
+AddElementTag("run", $bgColor="#2e7d32", $fontColor="#ffffff", $borderColor="#1b5e20", $legendText="Running in Azure")
+AddElementTag("data", $bgColor="#6a1b9a", $fontColor="#ffffff", $borderColor="#4a148c", $legendText="State and secrets")
+AddRelTag("gitops", $lineColor="#24292f", $textColor="#24292f", $lineStyle=BoldLine(), $legendText="desired state (GitOps)")
+AddRelTag("deploy", $lineColor="#0d80d8", $textColor="#0a5ea0", $legendText="builds, releases, deploys")
+AddRelTag("runtime", $lineColor="#2e7d32", $textColor="#1b5e20", $legendText="calls at run time")
+AddRelTag("observe", $lineColor="#8d6e63", $textColor="#5d4037", $lineStyle=DashedLine(), $legendText="reads to check or show")
+
+Person(person, "Jeffrey", "Decides: approves recommendations, signs in to the portal and Octopus")
+Person(operator, "Operator session", "Claude Code as the machine user (aiops): pull requests, rollouts, sign-offs with a reason")
+Person(visitor, "Visitor", "A browser: a student, or the dashboard itself")
+
+System_Boundary(github, "GitHub: clearmeasure-aisf-sample-apps") {
+  Container(kit, "demo-environment-kit", "templates, scripts, docs", "The source of every system's templates and of the scripts that operate them; fleet/systems/cmdemo2.json is the system's registry file", $tags="git")
+  Container(sysrepo, "cmdemo2-system", "system.json, infra/ (Bicep), octopus/ (Terraform), scripts/", "The system's desired state: environments, capabilities, sizes; environments/<env>/versions.json pins what runs where", $tags="git")
+  Container(apprepo, "cmdemo2-workorders", ".NET 10 app", "The work-order app; serves /_healthcheck, /_version, /_telemetry, /_build", $tags="git")
+  Container(dashrepo, "cmdemo2-dashboard", "Blazor WebAssembly", "The health dashboard: Health and Runtime views", $tags="git")
+  Container(status, "branch status", "delivery.json", "Who deployed what, when, with whose sign-off", $tags="data")
+  Container(syswf, "Workflows of cmdemo2-system", "GitHub Actions", "env-checks (preview of a pull request), system (apply Octopus, create the release), capabilities (47 checks, nightly), drift, delivery", $tags="pipe")
+  Container(appwf, "Build and Release", "GitHub Actions", "Tests, coverage, CRAP, Qodana; a versioned package with its build facts", $tags="pipe")
+}
+
+System_Boundary(octopus, "Octopus Deploy: space cmdemo2 demo") {
+  Container(osys, "Project cmdemo2-system", "release = a commit of the system repository", "Per environment: apply infra as a deployment stack, grant database access, verify. Runbooks: health report, failover test, restore test, password rotation", $tags="pipe")
+  Container(oui, "Project cmdemo2-ui", "release = a build of the app", "Sign-off, pin, migrate the database, deploy to primary and standby, verify, acceptance tests in tdd", $tags="pipe")
+  Container(odash, "Project cmdemo2-dashboard", "release = a build of the dashboard", "Sign-off, pin, write topology and runtime diagrams, deploy, verify", $tags="pipe")
+  Container(feed, "Built-in feed", "packages", "cmdemo2-ui and cmdemo2-dashboard, by version", $tags="data")
+}
+
+System_Boundary(azure, "Azure subscription: tdd, uat, prod") {
+  Container(afd, "Front Door afd-cmdemo2", "one endpoint per environment", "The public address; sends traffic to the primary, to the standby when the primary fails", $tags="run")
+  Container(apps, "Web apps", "App Service: primary westus3, standby eastus2", "app-cmdemo2-<env>-ui: the app, in every environment", $tags="run")
+  ContainerDb(sql, "Azure SQL", "one database per environment", "sqldb-cmdemo2-<env>", $tags="data")
+  ContainerDb(vault, "Key Vault", "per environment", "The database's connection string and password", $tags="data")
+  Container(appi, "Application Insights", "per environment", "Traces, metrics, logs of the app", $tags="data")
+  Container(swa, "Static Web App", "per environment", "swa-cmdemo2-<env>-dashboard: the dashboard's files, topology.json, runtime diagrams", $tags="run")
+  Container(stacks, "Deployment stacks", "deny settings", "stack-cmdemo2-<env>: nobody changes a resource except through the pipeline", $tags="data")
+}
+
+Rel(person, operator, "asks, approves")
+Rel(operator, kit, "changes templates and scripts", $tags="gitops")
+Rel(operator, sysrepo, "pull requests", $tags="gitops")
+Rel(operator, apprepo, "pull requests", $tags="gitops")
+Rel(operator, dashrepo, "pull requests", $tags="gitops")
+Rel(operator, osys, "promotes and signs off (invoke-demo-rollout.ps1)", $tags="deploy")
+
+Rel(kit, sysrepo, "templates by pull request (sync)", $tags="gitops")
+Rel(kit, dashrepo, "dashboard template", $tags="gitops")
+
+Rel(sysrepo, syswf, "a merge starts")
+Rel(syswf, osys, "configures the projects (Terraform), creates the release", $tags="deploy")
+Rel(apprepo, appwf, "a merge starts")
+Rel(dashrepo, appwf, "a merge starts")
+Rel(appwf, feed, "pushes the package", $tags="deploy")
+Rel(appwf, oui, "creates the release", $tags="deploy")
+Rel(appwf, odash, "creates the release", $tags="deploy")
+
+Rel(osys, stacks, "applies infra/ per environment", $tags="deploy")
+Rel(stacks, apps, "owns")
+Rel(stacks, afd, "owns the endpoints")
+Rel(stacks, sql, "owns")
+Rel(oui, feed, "takes the package")
+Rel(oui, apps, "deploys, verifies", $tags="deploy")
+Rel(oui, sql, "migrates", $tags="deploy")
+Rel(oui, sysrepo, "pins the version (versions.json)", $tags="gitops")
+Rel(odash, sysrepo, "reads system.json, pins", $tags="gitops")
+Rel(odash, swa, "deploys with topology and diagrams", $tags="deploy")
+
+Rel(visitor, afd, "HTTPS", $tags="runtime")
+Rel(afd, apps, "origins by priority; health probes", $tags="runtime")
+Rel(apps, sql, "reads and writes", $tags="runtime")
+Rel(apps, vault, "connection string", $tags="runtime")
+Rel(apps, appi, "telemetry (OpenTelemetry)", $tags="runtime")
+Rel(visitor, swa, "loads the dashboard", $tags="runtime")
+Rel(swa, apps, "the page asks health, version, calls, build", $tags="observe")
+Rel(swa, sysrepo, "the page reads the pins", $tags="observe")
+Rel(swa, status, "the page reads delivery facts", $tags="observe")
+Rel(syswf, status, "delivery publishes", $tags="observe")
+Rel(syswf, apps, "capabilities and drift check", $tags="observe")
+
+SHOW_LEGEND()
+@enduml
