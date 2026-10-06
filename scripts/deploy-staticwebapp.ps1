@@ -29,6 +29,28 @@
                                 its Octopus project
        The dashboard compares the pinned version with the version each node reports and links to the project and to
        the history. An address whose parts system.json does not give is null, and the dashboard leaves that part out.
+       What the dashboard shows beyond health comes the same way, each part optional:
+         telemetryPath, buildPath, trafficPaths
+                                per deployable, carried from system.json (deployables[]): where a node reports its
+                                calls and its process, where it reports the build it runs, what the traffic button
+                                calls
+         system.deliveryUrl     https://raw.githubusercontent.com/<githubOrg>/<repository>/status/delivery.json: the
+                                delivery facts a workflow of the system repository publishes to its branch "status"
+         links                  where a number or a name of the page leads, all in the Azure portal, which asks the
+                                viewer to sign in (the page holds no credential). Resource ids are conventions over
+                                system.json (azure.subscriptionId, azure.resourceGroups, the names the stack gives):
+                                  nodes[].links        portal (the web app) and, in an environment with capability
+                                                       "telemetry", liveMetrics, performance, failures (blades of
+                                                       appi-<slug>-<env>) and dependencies (a Logs query of the
+                                                       dependency calls of role <slug>-<deployable>)
+                                  deployables[].links  frontDoor (the profile azure.frontDoor, where the environment
+                                                       has an endpoint) and logs (a Logs query of the role's requests)
+                                  environments[].links resourceGroup, applicationInsights and applicationMap (with
+                                                       "telemetry") and database (sqldb-<slug>-<env>)
+                                The database's server has a generated suffix, so its name is read from Azure
+                                (az sql server list in the tier's resource group). A read that fails or is denied
+                                (the deploy identity of one tier may not read the other's group) is logged as
+                                information and leaves that link out.
     2. runtime/, next to topology.json: per environment of system.json a C4 deployment diagram (PlantUML source
        <env>.puml, the SVG <env>.svg and its manifest <env>.json), and index.json, the list of them (the contract is in
        the dashboard repository's README, "The runtime view"). The diagram is drawn from the topology and system.json:
@@ -38,7 +60,8 @@
        standby>-<region>; size system.planSku.<tier>, F1 without it and while azure.frontDoor.dormant) > web app; the
        Front Door endpoint in the profile; the database sqldb-<slug>-<env>; the static sites; the browser. Every node,
        region and Front Door or database relationship has a slot, a transparent image of a fixed size, where the
-       dashboard draws the live values. The script downloads the PlantUML release jar of the pinned version from GitHub,
+       dashboard draws the live values (a web app's slot holds seven lines under its badge: version, pin, traffic,
+       failures, process, uptime and role). The script downloads the PlantUML release jar of the pinned version from GitHub,
        verifies its SHA-256, renders every diagram in one Java process (layout engine smetana: no Graphviz; security
        profile SANDBOX) and checks that each SVG has every element the manifest names; a missing one fails the step.
        Java's output is logged as information; the download and the render are timed.
@@ -78,14 +101,50 @@ $swaCliNodeVersion = 18
 $plantUmlVersion = '1.2026.8'
 $plantUmlSha256 = '5E1ECFA8ECD32C90B03BBF3B1EB6F020943F98AB0FCF4032BE31A0002EE2C462'
 
+function Get-PortalAddress {
+    # The address of a resource's page (a "blade" of its menu, such as overview or performance) in the Azure portal.
+    # With the tenant the portal opens the right directory for a viewer who has several.
+    param(
+        [Parameter(Mandatory)] [string] $ResourceId,
+        [string] $Blade = 'overview',
+        [string] $TenantId = ''
+    )
+    $directory = if ($TenantId) { "@$TenantId/" } else { '' }
+    return "https://portal.azure.com/#${directory}resource$ResourceId/$Blade"
+}
+
+function Get-LogsAddress {
+    # The address of the Logs blade of a resource (an Application Insights component) with a query filled in: the
+    # portal's own "share a link to the query" form, the query gzipped, base64-encoded and URL-encoded.
+    param(
+        [Parameter(Mandatory)] [string] $ResourceId,
+        [Parameter(Mandatory)] [string] $Query,
+        [string] $Timespan = 'PT1H',
+        [string] $TenantId = ''
+    )
+    $buffer = [IO.MemoryStream]::new()
+    $gzip = [IO.Compression.GZipStream]::new($buffer, [IO.Compression.CompressionLevel]::Optimal, $true)
+    $bytes = [Text.Encoding]::UTF8.GetBytes($Query)
+    $gzip.Write($bytes, 0, $bytes.Length)
+    $gzip.Dispose()
+    $packed = [Uri]::EscapeDataString([Convert]::ToBase64String($buffer.ToArray()))
+    $directory = if ($TenantId) { "@$TenantId/" } else { '' }
+    return "https://portal.azure.com/#${directory}blade/Microsoft_Azure_Monitoring_Logs/LogsBlade/resourceId/$([Uri]::EscapeDataString($ResourceId))/source/LogsBlade.AnalyticsShareLinkToQuery/q/$packed/timespan/$Timespan"
+}
+
 function ConvertTo-Topology {
     # The dashboard's topology from system.json (parsed, as a hashtable) and the host name of each Front Door endpoint
     # by endpoint name (<slug>-<env>-<deployable>). It asks nothing: the same input gives the same topology.
     # The addresses of the pinned versions and of the Octopus projects are conventions over system.json; one whose
     # parts system.json lacks is null, which the dashboard reads as "not there".
+    # The links (where a number of the page leads in the Azure portal) are conventions too, over the subscription, the
+    # resource groups and the names the stack gives its resources; without azure.subscriptionId there are none. Only
+    # the SQL server's name is not a convention (it ends in a generated suffix): -SqlServer gives it per environment,
+    # and an environment without an entry gets no database link.
     param(
         [Parameter(Mandatory)] [hashtable] $System,
         [hashtable] $EndpointHost = @{},
+        [hashtable] $SqlServer = @{},
         [datetime] $Generated = [datetime]::UtcNow
     )
     $slug = [string] $System.system.slug
@@ -98,17 +157,70 @@ function ConvertTo-Topology {
     $octopusUrl = ([string] $octopus['url']).TrimEnd('/')
     $spaceId = [string] $octopus['spaceId']
     $projects = if ($octopusUrl -and $spaceId) { "$octopusUrl/app#/$spaceId/projects" } else { '' }
+    $azure = if ($System['azure']) { $System.azure } else { @{} }
+    $tenantId = [string] $azure['tenantId']
+    $subscription = if ($azure['subscriptionId']) { "/subscriptions/$([string] $azure.subscriptionId)" } else { '' }
+    $groups = if ($azure['resourceGroups']) { $azure.resourceGroups } else { @{} }
+    $frontDoor = if ($azure['frontDoor']) { $azure.frontDoor } else { @{} }
+    $frontDoorId = if ($subscription -and $frontDoor['profile'] -and $frontDoor['resourceGroup'] -and -not $frontDoor['dormant']) {
+        "$subscription/resourceGroups/$([string] $frontDoor.resourceGroup)/providers/Microsoft.Cdn/profiles/$([string] $frontDoor.profile)"
+    }
+    else { '' }
     $environments = @(foreach ($environment in @($System.environments)) {
             $environmentName = [string] $environment.name
             $versionsPath = "main/environments/$environmentName/versions.json"
             $standbyLocation = [string] $environment['standbyLocation']
             $hasFrontDoor = @($environment['capabilities']) -contains 'frontdoor'
+            # The environment's resources by their ids; empty where system.json does not say enough to name one.
+            $groupName = [string] $groups[[string] $environment['tier']]
+            $group = if ($subscription -and $groupName) { "$subscription/resourceGroups/$groupName" } else { '' }
+            $insights = if ($group -and @($environment['capabilities']) -contains 'telemetry') { "$group/providers/microsoft.insights/components/appi-$slug-$environmentName" } else { '' }
+            $server = [string] $SqlServer[$environmentName]
+            $environmentLinks = [ordered] @{}
+            if ($insights) {
+                $environmentLinks.applicationInsights = Get-PortalAddress -ResourceId $insights -TenantId $tenantId
+                $environmentLinks.applicationMap = Get-PortalAddress -ResourceId $insights -Blade 'applicationMap' -TenantId $tenantId
+            }
+            if ($group -and $server) {
+                $environmentLinks.database = Get-PortalAddress -ResourceId "$group/providers/Microsoft.Sql/servers/$server/databases/sqldb-$slug-$environmentName" -TenantId $tenantId
+            }
+            if ($group) { $environmentLinks.resourceGroup = Get-PortalAddress -ResourceId $group -TenantId $tenantId }
             $deployables = @(foreach ($app in $apps) {
                     $primary = "app-$slug-$environmentName-$($app.name)"
                     $nodes = @([ordered] @{ name = $primary; region = $location; role = 'primary'; url = "https://$primary.azurewebsites.net" })
                     if ($standbyLocation) {
                         $standby = "$primary-$standbyLocation"
                         $nodes += [ordered] @{ name = $standby; region = $standbyLocation; role = 'standby'; url = "https://$standby.azurewebsites.net" }
+                    }
+                    # Where each node's numbers lead. Application Insights is one component per environment: its
+                    # blades show every role, and the Logs queries are filtered to this app's role (OTEL_SERVICE_NAME,
+                    # <slug>-<deployable>), which both regions' web apps report under.
+                    $role = "$slug-$($app.name)"
+                    foreach ($node in $nodes) {
+                        $nodeLinks = [ordered] @{}
+                        if ($group) { $nodeLinks.portal = Get-PortalAddress -ResourceId "$group/providers/Microsoft.Web/sites/$($node.name)" -Blade 'appServices' -TenantId $tenantId }
+                        if ($insights) {
+                            $nodeLinks.liveMetrics = Get-PortalAddress -ResourceId $insights -Blade 'quickPulse' -TenantId $tenantId
+                            $nodeLinks.performance = Get-PortalAddress -ResourceId $insights -Blade 'performance' -TenantId $tenantId
+                            $nodeLinks.failures = Get-PortalAddress -ResourceId $insights -Blade 'failures' -TenantId $tenantId
+                            $nodeLinks.dependencies = Get-LogsAddress -ResourceId $insights -TenantId $tenantId -Query (@(
+                                    'dependencies'
+                                    "| where cloud_RoleName == `"$role`""
+                                    '| summarize calls = count(), failed = countif(success == false), avgMs = round(avg(duration), 1), p95Ms = round(percentile(duration, 95), 1) by type, target, name'
+                                    '| order by calls desc'
+                                ) -join "`n")
+                        }
+                        if ($nodeLinks.Count -gt 0) { $node.links = $nodeLinks }
+                    }
+                    $deployableLinks = [ordered] @{}
+                    if ($hasFrontDoor -and $frontDoorId) { $deployableLinks.frontDoor = Get-PortalAddress -ResourceId $frontDoorId -TenantId $tenantId }
+                    if ($insights) {
+                        $deployableLinks.logs = Get-LogsAddress -ResourceId $insights -TenantId $tenantId -Query (@(
+                                'requests'
+                                "| where cloud_RoleName == `"$role`""
+                                '| summarize requests = count(), failed = countif(success == false), p95Ms = round(percentile(duration, 95), 1) by bin(timestamp, 5m), cloud_RoleInstance'
+                                '| order by timestamp desc'
+                            ) -join "`n")
                     }
                     $hostName = [string] $EndpointHost["$slug-$environmentName-$($app.name)"]
                     [ordered] @{
@@ -122,6 +234,10 @@ function ConvertTo-Topology {
                         # calls (deployables[].trafficPaths): null without them, so an app without the endpoint shows dashes.
                         telemetryPath = if ($app['telemetryPath']) { [string] $app.telemetryPath } else { $null }
                         trafficPaths  = if ($app['trafficPaths']) { , @($app.trafficPaths | ForEach-Object { [string] $_ }) } else { $null }
+                        # Where the primary node reports the build it runs (deployables[].buildPath): null without it,
+                        # and the dashboard then shows no "Code" card.
+                        buildPath   = if ($app['buildPath']) { [string] $app.buildPath } else { $null }
+                        links       = $deployableLinks
                         nodes       = $nodes
                     }
                 })
@@ -130,14 +246,19 @@ function ConvertTo-Topology {
                 tier               = [string] $environment['tier']
                 versionsUrl        = if ($repository) { "https://raw.githubusercontent.com/$repository/$versionsPath" } else { $null }
                 versionsHistoryUrl = if ($repository) { "https://github.com/$repository/commits/$versionsPath" } else { $null }
+                links              = $environmentLinks
                 deployables        = $deployables
             }
         })
     return [ordered] @{
         system       = [ordered] @{
-            slug       = $slug
-            name       = [string] $System.system['name']
-            repository = if ($repository) { "https://github.com/$repository" } else { $null }
+            slug        = $slug
+            name        = [string] $System.system['name']
+            repository  = if ($repository) { "https://github.com/$repository" } else { $null }
+            # The delivery facts (who deployed what when, lead time, the last failover test): a workflow of the system
+            # repository publishes them to its branch "status"; until it has, the address answers 404 and the
+            # dashboard shows no delivery.
+            deliveryUrl = if ($repository) { "https://raw.githubusercontent.com/$repository/status/delivery.json" } else { $null }
         }
         generated    = $Generated.ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ssZ', [Globalization.CultureInfo]::InvariantCulture)
         environments = $environments
@@ -248,9 +369,14 @@ function ConvertTo-RuntimeDiagram {
 
     # Slots: the room for a tile, a region's label and a number line of a relationship (pixels; the dashboard's
     # runtime.js draws into them and assumes nothing about their size but what the SVG says).
-    $tileSlot = "<img:$(New-TransparentPng -Width 250 -Height 113)>"
+    # A web app's tile: the badge, seven lines 15 px apart (version, pin, traffic, failures, process, uptime, role)
+    # and the history strip. A Front Door endpoint's has three lines.
+    $tileSlot = "<img:$(New-TransparentPng -Width 250 -Height 146)>"
+    $endpointSlot = "<img:$(New-TransparentPng -Width 250 -Height 98)>"
     $smallTileSlot = "<img:$(New-TransparentPng -Width 250 -Height 46)>"
     $regionSlot = "<img:$(New-TransparentPng -Width 190 -Height 22)>"
+    # A relationship's number line (the number, its unit and its trend in a frame) and, under it, its role in words
+    # ("queries of the app · 55 background").
     $edgeSlot = "<img:$(New-TransparentPng -Width 160 -Height 34)>"
 
     # The regions, a region with two roles once, named after its first role. The standby is declared before the
@@ -317,7 +443,7 @@ function ConvertTo-RuntimeDiagram {
         foreach ($app in $apps) {
             $alias = "fd_$(Get-DeployableAlias $app.name)"
             $endpoint = "$slug-$Environment-$($app.name)"
-            $lines.Add("      Container($alias, $(Get-Quoted $endpoint), `"Front Door endpoint`", $(Get-Quoted $tileSlot))")
+            $lines.Add("      Container($alias, $(Get-Quoted $endpoint), `"Front Door endpoint`", $(Get-Quoted $endpointSlot))")
             Add-Node ([ordered] @{ alias = $alias; qualifiedName = "sub.rg_edge.afd.$alias"; kind = 'frontdoor'; deployable = [string] $app.name; name = $endpoint; url = $app.frontDoor })
         }
         $lines.Add('    }')
@@ -591,7 +717,30 @@ if ($withFrontDoor.Count -gt 0 -and $frontDoor['profile'] -and -not $frontDoor['
     }
 }
 
-$topology = ConvertTo-Topology -System $system -EndpointHost $endpointHosts
+# The name of each environment's SQL server, for the link to its database: it ends in a generated suffix, so it is read
+# (one list per tier's resource group). The deploy identity of one tier may not read the other tier's group: a read
+# that fails is information, and the dashboard then shows that environment's database without a link.
+$sqlServers = @{}
+$tierGroups = if ($system.azure['resourceGroups']) { $system.azure.resourceGroups } else { @{} }
+foreach ($tier in @($system.environments | ForEach-Object { [string] $_['tier'] } | Where-Object { $_ } | Select-Object -Unique)) {
+    $group = [string] $tierGroups[$tier]
+    if (-not $group) { continue }
+    $PSNativeCommandUseErrorActionPreference = $false
+    $listed = @(az sql server list --resource-group $group --query '[].name' --only-show-errors --output tsv 2>&1 | ForEach-Object { "$_".Trim() } | Where-Object { $_ })
+    $listCode = $LASTEXITCODE
+    $PSNativeCommandUseErrorActionPreference = $true
+    if ($listCode -ne 0) {
+        $reason = if ($listed.Count -gt 0) { $listed[0] } else { "exit code $listCode" }
+        Write-Host "The SQL servers of $group could not be listed ($reason): the dashboard links to no database in tier $tier."
+        continue
+    }
+    foreach ($environment in @($system.environments | Where-Object { [string] $_['tier'] -eq $tier })) {
+        $server = @($listed | Where-Object { $_ -like "sql-$slug-$([string] $environment.name)-*" }) | Select-Object -First 1
+        if ($server) { $sqlServers[[string] $environment.name] = [string] $server }
+    }
+}
+
+$topology = ConvertTo-Topology -System $system -EndpointHost $endpointHosts -SqlServer $sqlServers
 $nodeCount = 0
 $addressCount = 0
 foreach ($environment in $topology.environments) {
@@ -616,6 +765,18 @@ else {
 }
 if (-not ($system['octopus'] -and $system.octopus['url'] -and $system.octopus['spaceId'])) {
     Write-Host 'system.json names no Octopus address and space (octopus.url, octopus.spaceId): the dashboard links to no Octopus project.'
+}
+$linkCount = 0
+foreach ($environment in $topology.environments) {
+    $linkCount += $environment.links.Count
+    foreach ($deployable in $environment.deployables) {
+        $linkCount += $deployable.links.Count
+        foreach ($node in $deployable.nodes) { if ($node.Contains('links')) { $linkCount += $node.links.Count } }
+    }
+}
+Write-Host "Links into the Azure portal: $linkCount (web apps, Application Insights, databases, Front Door, resource groups); the portal asks the viewer to sign in."
+if ($topology.system.deliveryUrl) {
+    Write-Host "Delivery facts: the dashboard reads $($topology.system.deliveryUrl) (published by the system repository's workflow; shown once the file exists)."
 }
 
 # The runtime diagrams, next to topology.json: one C4 deployment view per environment, rendered here (the browser has
