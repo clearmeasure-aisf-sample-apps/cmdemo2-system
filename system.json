@@ -95,7 +95,12 @@
       "acceptanceTestsAssembly": "ClearMeasure.Bootcamp.AcceptanceTests.dll",
       "dataLoaderAssembly": "ClearMeasure.Bootcamp.IntegrationTests.dll",
       "acceptanceTestsFilter": "FullyQualifiedName~WarmUpTests|FullyQualifiedName~LandingPageTests|FullyQualifiedName~LogoutTests|FullyQualifiedName~WorkOrderSaveDraftTests|FullyQualifiedName~WorkOrderAssignTests|FullyQualifiedName~WorkOrderBeginTests|FullyQualifiedName~WorkOrderCompleteTests|FullyQualifiedName~WorkOrderCancelTests|FullyQualifiedName~WorkOrderShelvedTests",
-      "acceptanceTestsWorkers": 2
+      "acceptanceTestsWorkers": 2,
+      "telemetryPath": "/_telemetry",
+      "trafficPaths": [
+        "/",
+        "/api/work-orders/status-counts"
+      ]
     },
     {
       "name": "dashboard",
