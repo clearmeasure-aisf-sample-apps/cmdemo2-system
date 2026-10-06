@@ -118,6 +118,9 @@ module sql 'modules/sql.bicep' = {
     // the month's free amount in about two days and is then paused until the next month: system.sqlFreeLimitExhaustion
     // "BillOverUsage" keeps it running at the serverless rate instead. Unset, it pauses.
     freeLimitExhaustionBehavior: string(union({ sqlFreeLimitExhaustion: 'AutoPause' }, system.system).sqlFreeLimitExhaustion) == 'BillOverUsage' ? 'BillOverUsage' : 'AutoPause'
+    // system.sqlSku "Basic": a fixed-price database that is always on, for a system that is never left alone (its
+    // Front Door probes the apps, the apps poll the database). Unset: serverless under the free offer.
+    databaseSku: string(union({ sqlSku: 'Serverless' }, system.system).sqlSku) == 'Basic' ? 'Basic' : 'Serverless'
   }
 }
 
