@@ -100,7 +100,8 @@
       "trafficPaths": [
         "/",
         "/api/work-orders/status-counts"
-      ]
+      ],
+      "buildPath": "/_build"
     },
     {
       "name": "dashboard",
