@@ -9,7 +9,8 @@
     "planSku": {
       "nonprod": "B1",
       "prod": "B1"
-    }
+    },
+    "sqlFreeLimitExhaustion": "BillOverUsage"
   },
   "azure": {
     "tenantId": "40645332-2e20-4bca-882c-b2706f93ce44",
