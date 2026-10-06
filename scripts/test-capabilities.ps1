@@ -485,6 +485,7 @@ $checks = [ordered] @{
     'CAP-076' = {
         # The delivery tool shows each environment's health: a "Health report" run of the last three hours succeeded
         # in every environment (the runbook is hourly, and fails when a node does not answer).
+        if ($system.azure.ContainsKey('frontDoor') -and $system.azure.frontDoor['dormant']) { Skip-Check 'the system is dormant: the hourly health report is off so the apps and their databases can sleep' }
         $since = [datetimeoffset]::UtcNow.AddHours(-3)
         $runs = @((Invoke-Octopus "/api/$space/tasks?name=RunbookRun&take=200").Items | Where-Object { $_.Description -like '*Health report*' -and [datetimeoffset] $_.QueueTime -gt $since })
         if ($runs.Count -eq 0 -and (Get-SystemAge) -lt 0.125) { Skip-Check 'the system is younger than three hours: no health report is due yet' }

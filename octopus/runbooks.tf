@@ -114,6 +114,9 @@ resource "octopusdeploy_project_scheduled_trigger" "runbook" {
   name        = each.value.schedule
   description = "${each.value.name}: ${each.value.description}"
   timezone    = "UTC"
+  # While the system is dormant (azure.frontDoor.dormant) nothing asks the apps on a schedule: a call an hour wakes
+  # each app, its message bus polls the database, and the database then never pauses.
+  is_disabled = each.key == "health_report" && try(local.system.azure.frontDoor.dormant, false)
 
   cron_expression_schedule {
     cron_expression = each.value.cron
