@@ -175,8 +175,14 @@ function Get-RoleName([string] $Group, [string] $PrincipalId) {
     }
 }
 function Get-RecentRun([string] $Runbook, [int] $Days) {
-    $runs = @((Invoke-Octopus "/api/$space/tasks?name=RunbookRun&take=100").Items |
-            Where-Object { $_.Description -like "*$Runbook*" -and $_.State -eq 'Success' -and [datetimeoffset] $_.CompletedTime -gt [datetimeoffset]::UtcNow.AddDays(-$Days) })
+    # The runbook's own successful runs, newest first. Asked by runbook: the hourly "Health report" alone fills the
+    # first page of all runbook runs within a day and a half, and a monthly run would drop out of it.
+    # Into a variable first: a JSON array answer goes down a pipeline as one object, and nothing would match.
+    $runbooks = Invoke-Octopus "/api/$space/runbooks/all"
+    $ids = @($runbooks | Where-Object { $_.Name -eq $Runbook } | ForEach-Object { [string] $_.Id })
+    $all = @(foreach ($id in $ids) { (Invoke-Octopus "/api/$space/tasks?name=RunbookRun&runbook=$id&states=Success&take=100").Items })
+    $runs = @($all | Where-Object { $_ -and [datetimeoffset] $_.CompletedTime -gt [datetimeoffset]::UtcNow.AddDays(-$Days) } |
+            Sort-Object { [datetimeoffset] $_.CompletedTime } -Descending)
     if ($runs.Count -eq 0 -and (Get-SystemAge) -lt $Days) { Skip-Check "the system is younger than $Days days: $Runbook is not due yet" }
     $runs
 }
@@ -511,6 +517,58 @@ $checks = [ordered] @{
             }
         }
         "every web app counts its calls: $($shown -join '; ')"
+    }
+    'CAP-078' = {
+        # Delivery facts where a browser can read them: workflow delivery publishes delivery.json on branch status
+        # (one commit, no commit on main), with every environment and, in each, the first app and the system project
+        # at the release Octopus last deployed. A deployment of the last 90 minutes may be ahead of the file: the
+        # workflow waits for the deployment that triggered it.
+        $branches = @(gh api "repos/$systemRepo/branches" --paginate --jq '.[].name')
+        if ($branches -notcontains 'status') { Skip-Check 'workflow delivery has not published branch status yet' }
+        $delivery = Get-RepoFile $systemRepo 'delivery.json?ref=status' | ConvertFrom-Json -AsHashtable
+        $listed = @($delivery['environments'] | Where-Object { $_ })
+        $compared = foreach ($e in $environments) {
+            $entry = @($listed | Where-Object { $_['name'] -eq $e }) | Select-Object -First 1
+            Assert-That ($null -ne $entry) "delivery.json on branch status does not list $e"
+            foreach ($name in @($deployable, 'system')) {
+                $fact = @($entry['deployables'] | Where-Object { $_ -and $_['name'] -eq $name }) | Select-Object -First 1
+                Assert-That ($null -ne $fact) "delivery.json does not list $name in $e"
+                $deployment = Find-LastDeployment "$slug-$(if ($name -eq 'system') { 'system' } else { $name })" $e
+                if (-not $deployment) { continue }
+                $settled = [datetimeoffset] (Invoke-Octopus "/api/tasks/$($deployment.TaskId)").CompletedTime -lt [datetimeoffset]::UtcNow.AddMinutes(-90)
+                Assert-That (-not $settled -or [string] $fact['version'] -eq $deployment.Version) "delivery.json says $name $($fact['version']) in $e, Octopus deployed $($deployment.Version): run workflow delivery"
+                "$e $name $($fact['version'])"
+            }
+        }
+        "delivery facts on branch status: $(@($compared).Count) deployment(s) match Octopus"
+    }
+    'CAP-079' = {
+        # Each deployed process says what it was built from: every web app of an App Service deployable with a
+        # buildPath answers it, from any origin, with the version Octopus last deployed there, the commit and the
+        # count of its lines of code. The quality sections (tests, coverage, complexity, CRAP, analysis) may be null:
+        # the Build run's artifacts expire.
+        $described = @($system.deployables | Where-Object { $_['hosting'] -eq 'appservice' -and $_['buildPath'] })
+        if ($described.Count -eq 0) { Skip-Check 'no App Service deployable has a buildPath in system.json' }
+        $shown = foreach ($app in $described) {
+            foreach ($entry in $system.environments) {
+                $deployment = Find-LastDeployment "$slug-$($app.name)" ([string] $entry.name)
+                if (-not $deployment) { continue }
+                $names = @("app-$slug-$($entry.name)-$($app.name)")
+                if ($entry['standbyLocation']) { $names += "app-$slug-$($entry.name)-$($app.name)-$($entry.standbyLocation)" }
+                foreach ($name in $names) {
+                    $answer = Invoke-WebRequest -Uri "https://$name.azurewebsites.net$($app.buildPath)" -Headers @{ Origin = 'https://capability-check.example' } -TimeoutSec 120 -SkipHttpErrorCheck
+                    Assert-That ($answer.StatusCode -eq 200) "$name answers $($app.buildPath) with HTTP $($answer.StatusCode): deploy a release of $slug-$($app.name) that has the endpoint"
+                    Assert-That ("$($answer.Headers['Access-Control-Allow-Origin'])" -eq '*') "$name does not allow other origins to read $($app.buildPath)"
+                    $facts = $(if ($answer.Content -is [byte[]]) { [Text.Encoding]::UTF8.GetString($answer.Content) } else { [string] $answer.Content }) | ConvertFrom-Json -AsHashtable
+                    Assert-That ([string] $facts['version'] -eq $deployment.Version) "$name says it is build $($facts['version']), Octopus deployed $($deployment.Version)"
+                    Assert-That ([string] $facts['commit'] -match '^[0-9a-f]{40}$') "$name names no commit at $($app.buildPath)"
+                    Assert-That ($facts['code'] -is [hashtable] -and [int] $facts.code['linesOfCode'] -gt 0) "$name counts no lines of code at $($app.buildPath)"
+                    "$name $($facts['version']) $(([string] $facts['commit']).Substring(0, 7))"
+                }
+            }
+        }
+        if (-not $shown) { Skip-Check 'no successful deployment of a deployable with a buildPath yet' }
+        "every web app describes its build: $(@($shown) -join '; ')"
     }
     'CAP-080' = { $files = @(gh api "repos/$systemRepo/contents/docs/architecture" --jq '.[].name'); $missing = @($files | Where-Object { $_ -like '*.puml' -and $files -notcontains ($_ -replace '\.puml$', '.png') }); Assert-That ($missing.Count -eq 0 -and $files.Count -gt 0) "not rendered: $missing"; "$(@($files | Where-Object { $_ -like '*.png' }).Count) diagrams rendered" }
     'CAP-081' = {
