@@ -114,6 +114,10 @@ module sql 'modules/sql.bicep' = {
     tags: tags
     administratorLogin: sqlAdminLogin
     administratorPassword: sqlAdminPassword
+    // A database that is never left alone (apps on a Basic plan do not sleep, and their message bus polls it) uses
+    // the month's free amount in about two days and is then paused until the next month: system.sqlFreeLimitExhaustion
+    // "BillOverUsage" keeps it running at the serverless rate instead. Unset, it pauses.
+    freeLimitExhaustionBehavior: string(union({ sqlFreeLimitExhaustion: 'AutoPause' }, system.system).sqlFreeLimitExhaustion) == 'BillOverUsage' ? 'BillOverUsage' : 'AutoPause'
   }
 }
 

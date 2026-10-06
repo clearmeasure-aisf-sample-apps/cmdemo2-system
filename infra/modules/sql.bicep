@@ -12,6 +12,13 @@ param administratorLogin string
 @secure()
 param administratorPassword string
 
+@description('What Azure does when the database has used the month\'s free amount (100,000 vCore seconds): AutoPause stops it until the next month, BillOverUsage bills what comes after (system.sqlFreeLimitExhaustion in system.json).')
+@allowed([
+  'AutoPause'
+  'BillOverUsage'
+])
+param freeLimitExhaustionBehavior string = 'AutoPause'
+
 resource server 'Microsoft.Sql/servers@2023-08-01' = {
   name: serverName
   location: location
@@ -46,7 +53,7 @@ resource database 'Microsoft.Sql/servers/databases@2023-08-01' = {
   }
   properties: {
     useFreeLimit: true
-    freeLimitExhaustionBehavior: 'AutoPause'
+    freeLimitExhaustionBehavior: freeLimitExhaustionBehavior
     autoPauseDelay: 60
     minCapacity: json('0.5')
     maxSizeBytes: 34359738368
