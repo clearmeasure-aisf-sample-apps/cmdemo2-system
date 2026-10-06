@@ -404,13 +404,24 @@ function ConvertTo-RuntimeDiagram {
         $nodes.Add($Node)
     }
     function Add-Edge {
-        param([string] $From, [string] $To, [string] $Kind, [string] $Label, [string] $Technology, [bool] $Slot, [int] $Priority = 0)
+        param([string] $From, [string] $To, [string] $Kind, [string] $Label, [string] $Technology, [bool] $Slot, [int] $Priority = 0, [string] $Link = '')
         $id = "$From-to-$To"
         $edge = [ordered] @{ id = $id; from = $From; to = $To; kind = $Kind }
         if ($Priority) { $edge.priority = $Priority }
         $edges.Add($edge)
         $description = if ($Slot) { $edgeSlot + '\n<U+00A0>' } else { '' }
-        $edgeLines.Add("Rel($From, $To, $(Get-Quoted $Label), $(Get-Quoted $Technology), $(Get-Quoted $description))")
+        $address = if ($Link) { ", `$link=$(Get-Quoted $Link)" } else { '' }
+        $edgeLines.Add("Rel($From, $To, $(Get-Quoted $Label), $(Get-Quoted $Technology), $(Get-Quoted $description)$address)")
+    }
+    function Get-ShortHost {
+        # A public address as the arrow's label: the host name, and when that is long its start, an ellipsis and the
+        # registered domain, so "cmdemo2-prod-ui-a2b5hkfrchg3ckew.z02.azurefd.net" reads "cmdemo2-prod-ui-a2…azurefd.net".
+        param([string] $Url, [int] $Length = 30)
+        $name = ([uri] $Url).Host
+        if ($name.Length -le $Length) { return $name }
+        $domain = ($name -split '\.' | Select-Object -Last 2) -join '.'
+        $start = [Math]::Max(4, $Length - $domain.Length - 1)
+        return $name.Substring(0, $start) + [char] 0x2026 + $domain
     }
 
     $lines = [Collections.Generic.List[string]]::new()
@@ -422,6 +433,10 @@ function ConvertTo-RuntimeDiagram {
     $lines.Add('SHOW_PERSON_OUTLINE()')
     $lines.Add('skinparam wrapWidth 300')
     $lines.Add('skinparam maxMessageSize 220')
+    # A public address on an arrow is a link, in the page's link colour, that opens in a new tab.
+    $lines.Add('skinparam svgLinkTarget _blank')
+    $lines.Add('skinparam hyperlinkColor #1f5fae')
+    $lines.Add('skinparam hyperlinkUnderline true')
     $lines.Add('skinparam nodesep 30')
     $lines.Add('skinparam ranksep 40')
     # The look before the dashboard updates it (and of a diagram opened on its own): neutral, nothing claims a state.
@@ -504,12 +519,17 @@ function ConvertTo-RuntimeDiagram {
         $key = Get-DeployableAlias $app.name
         $roles = @($app.nodes | ForEach-Object { [string] $_.role } | Where-Object { $_ -in 'primary', 'standby' })
         if ($hasFrontDoor) {
-            Add-Edge 'browser' "fd_$key" 'public' 'HTTPS' "public address of $($app.name)" $true
+            # The address itself, shortened and clickable, where the endpoint has one; the words until it does.
+            if ($app['frontDoor']) { Add-Edge 'browser' "fd_$key" 'public' (Get-ShortHost ([string] $app.frontDoor)) 'HTTPS' $true 0 ([string] $app.frontDoor) }
+            else { Add-Edge 'browser' "fd_$key" 'public' 'HTTPS' "public address of $($app.name)" $true }
             if ($roles -contains 'primary') { Add-Edge "fd_$key" "app_${key}_primary" 'origin' 'origin, priority 1' 'HTTPS' $true 1 }
             if ($roles -contains 'standby') { Add-Edge "fd_$key" "app_${key}_standby" 'origin' 'origin, priority 2' 'HTTPS' $true 2 }
         }
         else {
-            foreach ($role in $roles) { Add-Edge 'browser' "app_${key}_$role" 'public' 'HTTPS' "the web app's own address" $true }
+            foreach ($role in $roles) {
+                $own = [string] (@($app.nodes | Where-Object { $_.role -eq $role }) | Select-Object -First 1).url
+                Add-Edge 'browser' "app_${key}_$role" 'public' (Get-ShortHost $own) 'HTTPS' $true 0 $own
+            }
         }
     }
     foreach ($app in $apps) {
