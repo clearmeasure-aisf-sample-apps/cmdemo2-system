@@ -459,8 +459,14 @@ elseif ($frontDoor['resourceGroup']) {
         # that is still there afterwards is a failure.
         $PSNativeCommandUseErrorActionPreference = $false
         az stack group delete --name $edgeStackName --resource-group ([string] $frontDoor.resourceGroup) --action-on-unmanage deleteResources --yes --output none 2>$null
-        az stack group show --name $edgeStackName --resource-group ([string] $frontDoor.resourceGroup) --output none 2>$null
-        $stillThere = $LASTEXITCODE -eq 0
+        # A delete refused because the other one is under way leaves the stack there for a few minutes more: wait for
+        # it to go before calling it a failure (cmdemo2, 2026-10-06: the stack was gone two minutes after this step failed).
+        $stillThere = $true
+        foreach ($attempt in 1..30) {
+            az stack group show --name $edgeStackName --resource-group ([string] $frontDoor.resourceGroup) --output none 2>$null
+            if ($LASTEXITCODE -ne 0) { $stillThere = $false; break }
+            Start-Sleep -Seconds 20
+        }
         $PSNativeCommandUseErrorActionPreference = $true
         if ($stillThere) { Fail-Step "Stack $edgeStackName could not be removed from $($frontDoor.resourceGroup)." }
         Write-Highlight "Front Door endpoints of $environmentName removed ($(if ($dormant) { 'the system is dormant' } else { 'capability frontdoor is off' }))."
