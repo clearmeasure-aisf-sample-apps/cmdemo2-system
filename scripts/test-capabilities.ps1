@@ -571,6 +571,23 @@ $checks = [ordered] @{
         if (-not $shown) { Skip-Check 'no successful deployment of a deployable with a buildPath yet' }
         "every web app describes its build: $(@($shown) -join '; ')"
     }
+    'CAP-083' = {
+        # What each environment costs, where a browser can read it: workflow delivery publishes cost.json next to
+        # delivery.json on branch status, no older than two days (Azure's cost data is a day behind), with every
+        # environment, what they share, and the system's month so far.
+        $branches = @(gh api "repos/$systemRepo/branches" --paginate --jq '.[].name')
+        if ($branches -notcontains 'status') { Skip-Check 'workflow delivery has not published branch status yet' }
+        $files = @(gh api "repos/$systemRepo/contents?ref=status" --jq '.[].name')
+        if ($files -notcontains 'cost.json') { Skip-Check 'branch status has no cost.json yet: the hourly run of workflow delivery writes it' }
+        $cost = Get-RepoFile $systemRepo 'cost.json?ref=status' | ConvertFrom-Json -AsHashtable
+        $asOf = [datetime]::ParseExact([string] $cost['asOf'], 'yyyy-MM-dd', [Globalization.CultureInfo]::InvariantCulture, [Globalization.DateTimeStyles]::AssumeUniversal -bor [Globalization.DateTimeStyles]::AdjustToUniversal)
+        Assert-That ($asOf -gt [datetime]::UtcNow.AddDays(-3)) "cost.json on branch status is as of $($cost['asOf']): workflow delivery has not read the cost for more than two days"
+        $named = @($cost['environments'] | Where-Object { $_ } | ForEach-Object { [string] $_['name'] })
+        $absent = @(@($environments) + 'shared' | Where-Object { $named -notcontains $_ })
+        Assert-That ($absent.Count -eq 0) "cost.json does not list $($absent -join ', ')"
+        Assert-That ($cost['system'] -is [hashtable] -and $null -ne $cost.system['monthToDate']) 'cost.json has no cost of the system for the month: a resource group could not be read'
+        "cost as of $($cost['asOf']): $($cost['currency']) $($cost.system['monthToDate']) this month for $($named -join ', ')"
+    }
     'CAP-080' = { $files = @(gh api "repos/$systemRepo/contents/docs/architecture" --jq '.[].name'); $missing = @($files | Where-Object { $_ -like '*.puml' -and $files -notcontains ($_ -replace '\.puml$', '.png') }); Assert-That ($missing.Count -eq 0 -and $files.Count -gt 0) "not rendered: $missing"; "$(@($files | Where-Object { $_ -like '*.png' }).Count) diagrams rendered" }
     'CAP-081' = {
         $build = Get-RepoFile $systemRepo '.github/workflows/system.yml'; $nightly = Get-RepoFile $systemRepo '.github/workflows/capabilities.yml'
