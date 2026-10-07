@@ -207,8 +207,9 @@ module prodWhatIf 'modules/role-assignment.bicep' = {
   }
 }
 
-// Cross-group grants: the plan identity reads prod, and (with a registry) prod's runtime identities pull from the
-// registry in nonprod.
+// Cross-group grants: the plan identity reads prod and its cost (scripts/write-cost.ps1; every group of the system
+// has the same assignment, in its own module), and (with a registry) prod's runtime identities pull from the registry
+// in nonprod.
 module prodReader 'modules/role-assignment.bicep' = {
   name: 'seed-${slug}-prod-reader'
   scope: prodGroup
@@ -216,6 +217,16 @@ module prodReader 'modules/role-assignment.bicep' = {
     principalId: nonprod.outputs.plan.principalId
     roleDefinitionId: 'acdd72a7-3385-48ef-bd42-f606fba81ae7' // Reader
     description: 'id-${slug}-plan: what-if previews and drift checks of prod'
+  }
+}
+
+module prodCostReader 'modules/role-assignment.bicep' = {
+  name: 'seed-${slug}-prod-cost-reader'
+  scope: prodGroup
+  params: {
+    principalId: nonprod.outputs.plan.principalId
+    roleDefinitionId: '72fafb9e-0641-4937-9268-a91bfd8191a3' // Cost Management Reader
+    description: 'id-${slug}-plan: the cost of prod, for the health dashboard'
   }
 }
 
