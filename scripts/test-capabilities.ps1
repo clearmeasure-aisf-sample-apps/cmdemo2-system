@@ -11,6 +11,12 @@
     test-capabilities.ps1. It changes nothing. Each check names the capability it proves (CAP-NNN in the kit's
     docs/capabilities.md); a failed check fails the run, and the workflow opens an issue labelled "capability".
 
+    The checks compare Git, Octopus and Azure at rest. The run first waits until no Octopus task runs (-WaitMinutes).
+    A deployment or runbook run that starts after that is noticed when a check fails: the run then asks Octopus once
+    whether a deployment or runbook run ran since the checks began, and if so waits for the space to be quiet again
+    (-AgainMinutes) and runs the failed checks once more. Only what fails then is a failure; the output names the
+    checks that ran again and the task that was the reason. FAIL lines come after the last check for that reason.
+
     Octopus: OCTOPUS_API_KEY when set (the operator), otherwise OCTOPUS_ACCESS_TOKEN (OctopusDeploy/login). GitHub: gh
     with GH_TOKEN or its own login. Azure: the current az login.
 #>
@@ -21,7 +27,10 @@ param(
     [switch] $ListChecks,
     # Only wait until no Octopus task runs, then stop (the workflow waits before it signs in to Azure; see capabilities.yml).
     [switch] $WaitOnly,
-    [int] $WaitMinutes = 90
+    [int] $WaitMinutes = 90,
+    # How long the failed checks wait for Octopus to become quiet again before they run once more (see the end of this
+    # file). Short: the workflow's sign-ins to Azure and Octopus last an hour.
+    [int] $AgainMinutes = 20
 )
 
 Set-StrictMode -Version Latest
@@ -130,6 +139,15 @@ function Get-App([string] $Environment) {
     $name = "$(az stack group show --name "stack-$slug-$Environment" --resource-group (Get-Group $Environment) --query "outputs.deployables.value[?name=='$deployable'].containerApp | [0]" --output tsv)".Trim()
     if (-not $name) { throw "stack-$slug-$Environment lists no container app for $deployable (a failed or unfinished apply?)" }
     az containerapp show --name $name --resource-group (Get-Group $Environment) --output json | ConvertFrom-Json -AsHashtable
+}
+function Get-ContainerApp([string] $Environment) {
+    # Every container app of the environment, by the names the stack reports, each with the deployable it runs.
+    $entries = az stack group show --name "stack-$slug-$Environment" --resource-group (Get-Group $Environment) --query 'outputs.deployables.value[?containerApp].{name: name, app: containerApp}' --output json | ConvertFrom-Json -AsHashtable
+    foreach ($entry in @($entries)) {
+        $app = az containerapp show --name $entry.app --resource-group (Get-Group $Environment) --output json | ConvertFrom-Json -AsHashtable
+        $app.deployable = [string] $entry.name
+        $app
+    }
 }
 function Get-Site([string] $Environment) {
     # The App Service web app of the first deployable, by the name the stack reports, with its plan's SKU.
@@ -297,7 +315,19 @@ $checks = [ordered] @{
             if ($paid) { return "Free plans, except the declared Basic plan of $($paid -join ', '), which is Free while the system is dormant" }
             return 'every app runs on a Free plan'
         }
-        foreach ($e in $environments) { $a = Get-App $e; Assert-That ($a.properties.template.scale.minReplicas -eq 0) "$e has min replicas $($a.properties.template.scale.minReplicas)" }; 'every app scales to zero'
+        # Every container app scales to zero, except a deployable that system.json declares always on ("alwaysOn":
+        # true: a background service), which keeps exactly one replica: a declared cost, not an accident. With
+        # "alwaysOnEnvironments" it keeps that replica in those environments only and scales to zero in the others.
+        $declared = @($system.deployables | Where-Object { $_['alwaysOn'] -eq $true })
+        $alwaysOn = @($declared | ForEach-Object { [string] $_.name })
+        foreach ($e in $environments) {
+            foreach ($a in @(Get-ContainerApp $e)) {
+                $kept = @($declared | Where-Object { [string] $_.name -eq $a.deployable -and (-not $_['alwaysOnEnvironments'] -or @($_['alwaysOnEnvironments']) -ccontains $e) })
+                $want = if ($kept.Count -gt 0) { 1 } else { 0 }
+                Assert-That ($a.properties.template.scale.minReplicas -eq $want) "$($a.name) in $e has min replicas $($a.properties.template.scale.minReplicas); system.json declares $want"
+            }
+        }
+        if ($alwaysOn.Count -gt 0) { "every app scales to zero, except the declared always-on $($alwaysOn -join ', ') (one replica)" } else { 'every app scales to zero' }
     }
     'CAP-040' = { $d = Get-LastDeployment $deployableProject $first; Assert-That ($d.Log -match 'Acceptance tests passed') "the last deployment to $first ran no passing acceptance tests"; "$($d.Version) passed the acceptance tests in $first" }
     'CAP-041' = { $d = Get-LastDeployment $deployableProject $first; Assert-That ($d.Log -match 'test data was reloaded') 'no ZDataLoader'; "test data reloaded after $($d.Version)" }
@@ -399,6 +429,46 @@ $checks = [ordered] @{
     'CAP-053' = { $u = az account show --query user.type --output tsv; $me = Invoke-Octopus '/api/users/me'; Assert-That ($u -eq 'servicePrincipal' -and $me.IsService) "az $u, Octopus service $($me.IsService)"; "az as a service principal, Octopus as $($me.Username)" }
     'CAP-055' = { Assert-AppRepository; Assert-That ((Get-RequiredCheck $appRepo) -contains 'secret-scan' -and (Get-RepoFile $systemRepo '.github/workflows/env-checks.yml') -match 'gitleaks') 'secret scanning not enforced'; 'gitleaks in env-checks and the required check secret-scan' }
     'CAP-056' = { $r = Get-RecentRun 'Rotate SQL password' 35; Assert-That ($r.Count -ge 1) 'no successful rotation in 35 days'; "rotated $($r[0].CompletedTime)" }
+    'CAP-057' = {
+        # A secret a deployable declares (system.json deployables[].secrets) reaches its app from the environment's
+        # vault by reference, as <deployable>-<name>; the app holds no secret as a stored value. The reference is read
+        # by the deployable's own identity (id-<slug>-<env>-<deployable>), not by the environment's shared runtime
+        # identity, which in that environment has no role on the vault as a whole and is closed to the app's code.
+        # Checked wherever the deployable has been deployed.
+        $with = @($system.deployables | Where-Object { @($_['secrets'] | Where-Object { $_ }).Count -gt 0 })
+        if ($with.Count -eq 0) { Skip-Check 'no deployable declares secrets yet' }
+        $shown = foreach ($entry in $with) {
+            $name = [string] $entry.name
+            foreach ($e in $environments) {
+                if ($entry.ContainsKey('environments') -and @($entry.environments) -notcontains $e) { continue }
+                if (-not (Find-LastDeployment "$slug-$name" $e)) { continue }
+                $app = @(Get-ContainerApp $e | Where-Object { $_.deployable -eq $name })[0]
+                Assert-That ($null -ne $app) "stack-$slug-$e lists no container app for $name (a failed or unfinished apply?)"
+                $shared = @($system.azure.identities.apps | Where-Object { $_.environment -eq $e })[0]
+                $held = @($app.properties.configuration['secrets'] | Where-Object { $_ })
+                $inline = @($held | Where-Object { -not $_['keyVaultUrl'] } | ForEach-Object { [string] $_.name })
+                Assert-That ($inline.Count -eq 0) "$($app.name) in $e holds $($inline -join ', ') as a stored value, not as a vault reference"
+                foreach ($secret in @($entry.secrets)) {
+                    $reference = @($held | Where-Object { $_.name -eq $secret.name })[0]
+                    Assert-That ($null -ne $reference -and ([string] $reference['keyVaultUrl']).EndsWith("/secrets/$name-$($secret.name)") -and $reference['identity']) "$($app.name) in $e does not reference the vault secret $name-$($secret.name) for $($secret.name)"
+                    Assert-That ([string] $reference.identity -like "*/userAssignedIdentities/id-$slug-$e-$name") "$($app.name) in $e reads $($secret.name) as $((([string] $reference.identity) -split '/')[-1]), not as its own identity id-$slug-$e-$name"
+                    $variable = @($app.properties.template.containers[0].env | Where-Object { $_.name -eq $secret.env })[0]
+                    Assert-That ($null -ne $variable -and $variable['secretRef'] -eq $secret.name) "$($app.name) in $e does not get $($secret.env) from the secret $($secret.name)"
+                }
+                # The shared identity pulls the image; the app's code must not be able to use it, and it must not
+                # read the vault as a whole (through the ARM API of the version that knows identitySettings).
+                $settings = @(az rest --method get --url "https://management.azure.com$($app.id)?api-version=2025-01-01" --query 'properties.configuration.identitySettings' --output json | ConvertFrom-Json -AsHashtable | Where-Object { $_ })
+                Assert-That (@($settings | Where-Object { [string] $_.identity -like "*/userAssignedIdentities/$($shared.name)" -and $_.lifecycle -eq 'None' }).Count -eq 1) "the code of $($app.name) in $e can use the shared runtime identity $($shared.name) (no identitySettings entry with lifecycle None)"
+                $vault = ([string] (az stack group show --name "stack-$slug-$e" --resource-group (Get-Group $e) --query outputs.keyVaultName.value --output tsv)).Trim()
+                $vaultId = "/subscriptions/$($system.azure.subscriptionId)/resourceGroups/$(Get-Group $e)/providers/Microsoft.KeyVault/vaults/$vault"
+                $wide = @(az role assignment list --scope $vaultId --query "[?principalId=='$($shared.principalId)'].roleDefinitionName" --output tsv | Where-Object { $_ })
+                Assert-That ($wide.Count -eq 0) "the shared runtime identity $($shared.name) holds $($wide -join ', ') on the whole vault $vault in ${e}: it could read the secrets of $name"
+                "$name in $e ($(@($entry.secrets).Count))"
+            }
+        }
+        if (-not $shown) { Skip-Check 'no deployable that declares secrets has been deployed yet' }
+        "every declared secret is a vault reference read by the deployable's own identity, out of reach of the shared runtime identity: $($shown -join ', ')"
+    }
     'CAP-060' = { $r = Get-RecentRun 'Restore test' 8; Assert-That ($r.Count -ge 1) 'no successful restore test in 8 days'; "restore test passed $($r[0].CompletedTime)" }
     'CAP-061' = { $prod = @(Get-ProdEnvironment)[0]; $d = Get-LastDeployment $deployableProject $prod; Assert-That ($d.Log -match 'Restore point before') "no restore point in the last $prod deployment"; "restore point recorded before $($d.Version) in $prod" }
     'CAP-070' = {
@@ -588,6 +658,52 @@ $checks = [ordered] @{
         Assert-That ($cost['system'] -is [hashtable] -and $null -ne $cost.system['monthToDate']) 'cost.json has no cost of the system for the month: a resource group could not be read'
         "cost as of $($cost['asOf']): $($cost['currency']) $($cost.system['monthToDate']) this month for $($named -join ', ')"
     }
+    'CAP-086' = {
+        # A node that is not healthy says which of its checks failed: every web app of an App Service deployable with a
+        # healthDetailPath answers it, from any origin, with named entries and their states, and the topology every
+        # deployed dashboard serves carries the path, so the page shows a mark per entry.
+        $detailed = @($system.deployables | Where-Object { $_['hosting'] -eq 'appservice' -and $_['healthDetailPath'] })
+        if ($detailed.Count -eq 0) { Skip-Check 'no App Service deployable has a healthDetailPath in system.json' }
+        $shown = foreach ($app in $detailed) {
+            foreach ($entry in $system.environments) {
+                if (-not (Find-LastDeployment "$slug-$($app.name)" ([string] $entry.name))) { continue }
+                $name = "app-$slug-$($entry.name)-$($app.name)"
+                $answer = Invoke-WebRequest -Uri "https://$name.azurewebsites.net$($app.healthDetailPath)" -Headers @{ Origin = 'https://capability-check.example' } -TimeoutSec 120 -SkipHttpErrorCheck
+                Assert-That ($answer.StatusCode -in 200, 503) "$name answers $($app.healthDetailPath) with HTTP $($answer.StatusCode)"
+                Assert-That ("$($answer.Headers['Access-Control-Allow-Origin'])" -eq '*') "$name does not allow other origins to read $($app.healthDetailPath)"
+                $detail = $(if ($answer.Content -is [byte[]]) { [Text.Encoding]::UTF8.GetString($answer.Content) } else { [string] $answer.Content }) | ConvertFrom-Json -AsHashtable
+                $entries = @($detail['entries'] | Where-Object { $_ -and $_['name'] -and $_['status'] })
+                Assert-That ($entries.Count -gt 0) "$name names no health-check entries at $($app.healthDetailPath)"
+                "$name $($entries.Count) checks"
+            }
+        }
+        if (-not $shown) { Skip-Check 'no successful deployment of a deployable with a healthDetailPath yet' }
+        "every primary web app names its health checks: $(@($shown) -join '; ')"
+    }
+    'CAP-087' = {
+        # What the system depends on outside Azure is on the runtime diagram with its state: every dependency of
+        # system.json (deployables[].dependencies) is a node of kind "dependency" in the runtime manifest of every
+        # environment that every deployed dashboard serves.
+        $declared = @(foreach ($app in $system.deployables) { foreach ($d in @($app['dependencies'] | Where-Object { $_ })) { [string] $d['name'] } })
+        if ($declared.Count -eq 0) { Skip-Check 'no deployable declares dependencies in system.json' }
+        $dashboard = @($system.deployables | Where-Object { $_['hosting'] -eq 'staticwebapp' }) | Select-Object -First 1
+        if (-not $dashboard) { Skip-Check 'no deployable with hosting staticwebapp yet' }
+        $shown = foreach ($e in $environments) {
+            if (-not (Find-LastDeployment "$slug-$($dashboard.name)" $e)) { continue }
+            $url = "$(az stack group show --name "stack-$slug-$e" --resource-group (Get-Group $e) --query "outputs.deployables.value[?name=='$($dashboard.name)'].url | [0]" --output tsv)".Trim()
+            Assert-That ([bool] $url) "stack-$slug-$e lists no site for $($dashboard.name)"
+            foreach ($drawn in $environments) {
+                $content = (Invoke-WebRequest -Uri "$url/runtime/$drawn.json" -TimeoutSec 120).Content
+                $manifest = $(if ($content -is [byte[]]) { [Text.Encoding]::UTF8.GetString($content) } else { [string] $content }) | ConvertFrom-Json -AsHashtable
+                $names = @($manifest['nodes'] | Where-Object { $_ -and $_['kind'] -eq 'dependency' } | ForEach-Object { [string] $_['name'] })
+                $lost = @($declared | Where-Object { $names -notcontains $_ })
+                Assert-That ($lost.Count -eq 0) "the dashboard in $e does not draw $($lost -join ', ') in the diagram of ${drawn}: deploy the release of $slug-$($dashboard.name) to $e again"
+            }
+            $e
+        }
+        if (-not $shown) { Skip-Check "no successful $slug-$($dashboard.name) deployment yet" }
+        "$($declared -join ', ') on the runtime diagrams served in $(@($shown) -join ', ')"
+    }
     'CAP-080' = { $files = @(gh api "repos/$systemRepo/contents/docs/architecture" --jq '.[].name'); $missing = @($files | Where-Object { $_ -like '*.puml' -and $files -notcontains ($_ -replace '\.puml$', '.png') }); Assert-That ($missing.Count -eq 0 -and $files.Count -gt 0) "not rendered: $missing"; "$(@($files | Where-Object { $_ -like '*.png' }).Count) diagrams rendered" }
     'CAP-081' = {
         $build = Get-RepoFile $systemRepo '.github/workflows/system.yml'; $nightly = Get-RepoFile $systemRepo '.github/workflows/capabilities.yml'
@@ -603,29 +719,84 @@ if ($ListChecks) {
 }
 # Checks compare Git, Octopus and Azure; in the middle of a deployment or runbook run they differ by design, so the
 # run waits until the space is quiet.
-$deadline = [datetimeoffset]::UtcNow.AddMinutes($WaitMinutes)
-while (@((Invoke-Octopus "/api/$space/tasks?states=Executing,Queued,Cancelling&take=10").Items).Count -gt 0) {
-    if ([datetimeoffset]::UtcNow -gt $deadline) {
-        if ($WaitOnly) { Write-Host "Octopus is still busy after $WaitMinutes minutes; the checks wait on."; exit 0 }
-        Write-Fail "the space did not become quiet in $WaitMinutes minutes"
-        exit 1
+function Wait-QuietSpace([int] $Minutes) {
+    # $true once no task of the space runs or waits; $false when that takes longer than $Minutes. One read a minute.
+    $deadline = [datetimeoffset]::UtcNow.AddMinutes($Minutes)
+    while (@((Invoke-Octopus "/api/$space/tasks?states=Executing,Queued,Cancelling&take=10").Items).Count -gt 0) {
+        if ([datetimeoffset]::UtcNow -gt $deadline) { return $false }
+        Write-Host 'Waiting for running Octopus tasks to finish.'
+        Start-Sleep -Seconds 60
     }
-    Write-Host 'Waiting for running Octopus tasks to finish.'
-    Start-Sleep -Seconds 60
+    $true
+}
+function Get-TaskSince([datetimeoffset] $Since) {
+    # The deployments and runbook runs of the space that run now or ended after $Since, newest first: one read of the
+    # space's latest tasks.
+    @((Invoke-Octopus "/api/$space/tasks?take=50").Items | Where-Object {
+            $_.Name -in 'Deploy', 'RunbookRun' -and (-not $_.IsCompleted -or ($_.CompletedTime -and [datetimeoffset] $_.CompletedTime -ge $Since))
+        })
+}
+function Invoke-Check([string] $Id) {
+    # One check: Result PASS, SKIP or FAIL, and what it found.
+    try { @{ Id = $Id; Result = 'PASS'; Message = "$(& $checks[$Id])" } }
+    catch [CheckSkipped] { @{ Id = $Id; Result = 'SKIP'; Message = $_.Exception.Message } }
+    catch { @{ Id = $Id; Result = 'FAIL'; Message = $_.Exception.Message } }
+}
+function Write-Check([hashtable] $Check, [string] $Note = '') {
+    if ($Check.Result -eq 'FAIL') { Write-Fail "$($Check.Id): $($Check.Message)$Note" }
+    elseif ($Check.Result -eq 'SKIP') { Write-Host "SKIP $($Check.Id): $($Check.Message)$Note" }
+    else { Write-Pass "$($Check.Id): $($Check.Message)$Note" }
+}
+
+if (-not (Wait-QuietSpace $WaitMinutes)) {
+    if ($WaitOnly) { Write-Host "Octopus is still busy after $WaitMinutes minutes; the checks wait on."; exit 0 }
+    Write-Fail "the space did not become quiet in $WaitMinutes minutes"
+    exit 1
 }
 if ($WaitOnly) {
     Write-Host 'Octopus is quiet.'
     exit 0
 }
+# The checks begin here, with the space quiet. Ten seconds back: the clocks of this machine and of Octopus may differ.
+$began = [datetimeoffset]::UtcNow.AddSeconds(-10)
 # @(...) around the whole if: a single -Only ID would otherwise become a string, which has no Count in strict mode.
 $ids = @(if ($Only) { $Only } else { $checks.Keys })
 $failed = 0
 $skipped = 0
+# A failed check is not a FAIL line yet: a deployment or runbook run that started after the wait above makes Git,
+# Octopus and Azure differ while it runs (cmdemo2, 2026-10-07: a rollout applied prod during the nightly run, three
+# checks failed on its half-applied stack and an issue was opened for nothing). So the failures are judged after the
+# last check, with one read of the space's tasks.
+$unproven = @()
 foreach ($id in $ids) {
     if (-not $checks.Contains($id)) { Write-Fail "${id}: no check"; $failed++; continue }
-    try { Write-Pass "${id}: $(& $checks[$id])" }
-    catch [CheckSkipped] { Write-Host "SKIP ${id}: $($_.Exception.Message)"; $skipped++ }
-    catch { Write-Fail "${id}: $($_.Exception.Message)"; $failed++ }
+    $outcome = Invoke-Check $id
+    if ($outcome.Result -eq 'FAIL') { $unproven += $outcome; continue }
+    if ($outcome.Result -eq 'SKIP') { $skipped++ }
+    Write-Check $outcome
+}
+if ($unproven.Count -gt 0) {
+    $rerun = $false
+    try {
+        $ranSince = @(Get-TaskSince $began)
+        if ($ranSince.Count -gt 0) {
+            $ranNames = @($ranSince | Select-Object -First 3 | ForEach-Object { "$($_.Description) ($($_.Id), $($_.State))" }) -join '; '
+            $ranMore = if ($ranSince.Count -gt 3) { " and $($ranSince.Count - 3) more" } else { '' }
+            Write-Host "Octopus was not quiet while the checks ran: $ranNames$ranMore. In the middle of a deployment or runbook run Git, Octopus and Azure differ by design, so what failed runs once more when the space is quiet: $(@($unproven | ForEach-Object { $_.Id }) -join ', ')."
+            $rerun = Wait-QuietSpace $AgainMinutes
+            if (-not $rerun) { Write-Host "The space did not become quiet in $AgainMinutes minutes: the failed checks are not run again, and their first result stands." }
+        }
+    }
+    catch {
+        Write-Host "Octopus could not be asked whether a task ran while the checks ran, or whether it is quiet again ($($_.Exception.Message)): the failed checks are not run again, and their first result stands."
+        $rerun = $false
+    }
+    foreach ($firstResult in $unproven) {
+        $outcome = if ($rerun) { Invoke-Check $firstResult.Id } else { $firstResult }
+        if ($outcome.Result -eq 'FAIL') { $failed++ } elseif ($outcome.Result -eq 'SKIP') { $skipped++ }
+        $rerunNote = if (-not $rerun) { '' } elseif ($outcome.Result -eq 'FAIL') { ' (run again after Octopus became quiet: it still fails)' } else { " (run again after Octopus became quiet; during the task it failed with: $($firstResult.Message))" }
+        Write-Check $outcome $rerunNote
+    }
 }
 $skippedNote = if ($skipped -gt 0) { " ($skipped skipped: their preconditions do not exist yet)" } else { '' }
 if ($failed -gt 0) {

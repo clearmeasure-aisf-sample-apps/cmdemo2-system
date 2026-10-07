@@ -18,19 +18,39 @@
       "shared"         the last entry: what carries no tag "environment" (the seed's resources: the registry, the
                        state account, the Front Door profile) and what Azure bills without tags
       system           everything in the groups
+    An App Service plan that several environments run on carries the tag of the one that creates it
+    (infra/main.bicep: the first environment of a tier owns the tier's plan asp-<slug>-<environment>, and the first
+    with a standby region that region's plan asp-<slug>-<environment>-<region>; the tier's other environments with
+    an App Service deployable, or with that standby region, run on them). Its cost is split evenly among the
+    environments that run on it, by day and service: which they are comes from system.json as the Bicep derives it,
+    and what the plan cost from one more query of its group, the same one for these plans only (a filter on their
+    resource ids), per set of plans that the same environments share. A plan one environment uses alone, and a
+    system without App Service, add no query.
     Three numbers each, all of complete UTC days:
       yesterday        the day asOf: the last complete UTC day
       last7Days        the seven days that end with asOf
       monthToDate      the first of asOf's month up to asOf
     topServices: per entry, the three services (Azure's ServiceName) that cost most in monthToDate, of those that
-    cost a cent or more. Amounts are rounded to cents; currency is the one Azure bills in.
+    cost a cent or more. Amounts are rounded to cents; currency is the one Azure bills in. The entries add up to
+    the system's number to the cent: what rounding each entry leaves over (a cent or two) goes to the first
+    environment (to the next entry, when it would make the number of an environment that cost nothing negative).
+
+    Runtime aks-argocd (system.json system.runtime): every environment is a namespace of one cluster, whose nodes
+    and disks are in the cluster's node resource group (<cluster group>-nodes: read too) and carry no environment,
+    so nearly all of the cost is "shared". Each environment therefore also gets an estimate of its part of the
+    cluster: "estimate" { share, yesterday, last7Days, monthToDate }, the cluster's untagged cost times the share of
+    CPU and memory that the environment's namespace requests of what all running pods request now (the mean of the
+    two), read from the cluster's own status file (https://<slug>-cluster.<cluster.domain>/cluster.json). It is
+    today's share applied to the days read, not a bill; the amounts stay part of "shared". Without that file (a
+    stopped cluster, a system without a dashboard) there is no estimate, with a SKIP line.
 
     Azure's cost data arrives hours late and is amended for a day or two: the numbers are what Azure reports now.
     A number that cannot be determined is null, with a SKIP line that says why: a resource group whose query was
     refused or throttled to the end leaves null the numbers it is part of (an environment: the group of its tier and
-    the groups that belong to no tier; "shared" and system: every group), and "yesterday" is null while Azure has no
-    cost of that day at all. Only Azure not answering fails the run (no sign-in, or no group answered), and then
-    nothing is written, so a published file is never replaced by an empty one.
+    the groups that belong to no tier; "shared" and system: every group), a query of shared plans that fails leaves
+    null the numbers of the environments that run on those plans, and "yesterday" is null while Azure has no cost of
+    that day at all. Only Azure not answering fails the run (no sign-in, or no group answered), and then nothing is
+    written, so a published file is never replaced by an empty one.
 
     Cost Management throttles (HTTP 429): a throttled query is tried again after the pause Azure names, or after
     20 s times the attempt (as the kit's get-fleet-limits.ps1), up to -Attempts times. A pause above
@@ -70,6 +90,35 @@ $tierOf = @{}
 foreach ($environment in $system.environments) { $tierOf[[string] $environment.name] = [string] $environment['tier'] }
 $shared = 'shared'
 
+# The App Service plans and the environments that run on each, as infra/main.bicep names and shares them: an
+# environment with an App Service deployable runs on the plan of the first environment of its tier and, with a
+# standbyLocation, on the plan of the first environment of its tier with that standby region.
+$plans = [ordered] @{}
+foreach ($environment in $system.environments) {
+    $name = [string] $environment.name
+    $hosted = @($system['deployables'] | Where-Object { $_ -and [string] $_['hosting'] -eq 'appservice' -and (-not $_.Contains('environments') -or @($_['environments']) -contains $name) })
+    if ($hosted.Count -eq 0) { continue }
+    $tier = [string] $environment['tier']
+    $ofTier = @($system.environments | Where-Object { [string] $_['tier'] -eq $tier })
+    $runsOn = @("asp-$slug-$([string] $ofTier[0].name)")
+    $standby = [string] $environment['standbyLocation']
+    if ($standby) { $runsOn += "asp-$slug-$([string] @($ofTier | Where-Object { [string] $_['standbyLocation'] -eq $standby })[0].name)-$standby" }
+    foreach ($plan in $runsOn) {
+        if (-not $plans.Contains($plan)) { $plans[$plan] = @{ Group = [string] $system.azure.resourceGroups[$tier]; Users = @() } }
+        $plans[$plan].Users += $name
+    }
+}
+# One query per set of plans of a group that the same environments share (nearly always one per tier, or none).
+$splits = [ordered] @{}
+foreach ($plan in $plans.Keys) {
+    $group = $plans[$plan].Group
+    $users = @($plans[$plan].Users)
+    if ($users.Count -lt 2 -or -not $group) { continue }
+    $key = "$group`: $($users -join ', ')"
+    if (-not $splits.Contains($key)) { $splits[$key] = @{ Group = $group; Users = $users; Plans = @() } }
+    $splits[$key].Plans += $plan
+}
+
 function Write-Pass { param([string] $Message) Write-Host "PASS $Message" }
 function Write-Fail { param([string] $Message) Write-Host "FAIL $Message" }
 function Write-Skip { param([string] $Message) Write-Host "SKIP $Message" }
@@ -80,6 +129,14 @@ function Format-Amount($Amount) { ([double] $Amount).ToString('0.00', [culturein
 $groups = [ordered] @{}
 foreach ($key in $system.azure.resourceGroups.Keys) {
     $groups[[string] $system.azure.resourceGroups[$key]] = if ($tierOf.Values -contains [string] $key) { [string] $key } else { '' }
+}
+# Runtime aks-argocd: the nodes, their disks and the load balancer are in the node resource group AKS creates
+# (infra/cluster.bicep names it <cluster group>-nodes); the seed lets the plan identity read its cost once it exists.
+$clusterGroups = @()
+if ([string] $system.system['runtime'] -eq 'aks-argocd' -and $system.azure.resourceGroups['cluster']) {
+    $clusterGroup = [string] $system.azure.resourceGroups.cluster
+    if (-not $groups.Contains("$clusterGroup-nodes")) { $groups["$clusterGroup-nodes"] = '' }
+    $clusterGroups = @($clusterGroup, "$clusterGroup-nodes")
 }
 $frontDoor = $system.azure['frontDoor']
 if ($frontDoor -is [Collections.IDictionary] -and $frontDoor['resourceGroup']) {
@@ -158,19 +215,33 @@ if (-not $signedIn) {
     exit 1
 }
 
-$body = [IO.Path]::GetTempFileName()
-$read = [ordered] @{}
-try {
+function Set-QueryBody([string] $BodyPath, [string[]] $ResourceIds = @()) {
+    # The query: the days read, by day, tag "environment" and service; of the whole scope, or of the named resources.
+    $dataset = @{
+        granularity = 'Daily'
+        aggregation = @{ totalCost = @{ name = 'Cost'; function = 'Sum' } }
+        grouping    = @(@{ type = 'TagKey'; name = 'environment' }, @{ type = 'Dimension'; name = 'ServiceName' })
+    }
+    if ($ResourceIds.Count -gt 0) { $dataset.filter = @{ dimensions = @{ name = 'ResourceId'; operator = 'In'; values = @($ResourceIds) } } }
     @{
         type       = 'ActualCost'
         timeframe  = 'Custom'
         timePeriod = @{ from = "$(Format-Day $from)T00:00:00Z"; to = "$(Format-Day $asOf)T23:59:59Z" }
-        dataset    = @{
-            granularity = 'Daily'
-            aggregation = @{ totalCost = @{ name = 'Cost'; function = 'Sum' } }
-            grouping    = @(@{ type = 'TagKey'; name = 'environment' }, @{ type = 'Dimension'; name = 'ServiceName' })
-        }
-    } | ConvertTo-Json -Depth 10 | Set-Content -LiteralPath $body -Encoding utf8NoBOM
+        dataset    = $dataset
+    } | ConvertTo-Json -Depth 10 | Set-Content -LiteralPath $BodyPath -Encoding utf8NoBOM
+}
+
+$body = [IO.Path]::GetTempFileName()
+$read = [ordered] @{}
+# The split of the shared plans: rows that take a plan's cost from the entry of its tag and give each environment
+# that runs on it an equal part. $planNeeds: per environment, the plan queries its numbers need; $planUnread: those
+# that failed.
+$splitRows = [Collections.Generic.List[object]]::new()
+$planNeeds = @{}
+foreach ($name in $environments) { $planNeeds[$name] = @() }
+$planUnread = @()
+try {
+    Set-QueryBody $body
     foreach ($group in $groups.Keys) {
         try {
             $read[$group] = Get-GroupCost $group $body
@@ -181,6 +252,33 @@ try {
             $reason = ("$($_.Exception.Message)" -split '\r?\n')[0].Trim()
             if ($reason.Length -gt 300) { $reason = $reason.Substring(0, 300) + '...' }
             Write-Skip "$group`: cost not read: $reason"
+        }
+    }
+    foreach ($key in $splits.Keys) {
+        $split = $splits[$key]
+        # Without the group's own answer the numbers of these environments are null anyway.
+        if (-not $read.Contains($split.Group)) { continue }
+        $label = "$($split.Plans -join ', ') in $($split.Group)"
+        foreach ($user in $split.Users) { $planNeeds[$user] += $label }
+        try {
+            Set-QueryBody $body @($split.Plans | ForEach-Object { "/subscriptions/$subscription/resourceGroups/$($split.Group)/providers/Microsoft.Web/serverfarms/$_" })
+            $ofPlans = Get-GroupCost $split.Group $body
+            $moved = 0.0
+            foreach ($row in $ofPlans) {
+                if ($row.Cost -eq 0) { continue }
+                $moved += $row.Cost
+                $splitRows.Add([pscustomobject] @{ Day = $row.Day; Tag = $row.Tag; Service = $row.Service; Cost = - $row.Cost; Currency = $row.Currency })
+                foreach ($user in $split.Users) {
+                    $splitRows.Add([pscustomobject] @{ Day = $row.Day; Tag = $user; Service = $row.Service; Cost = $row.Cost / $split.Users.Count; Currency = $row.Currency })
+                }
+            }
+            Write-Host "$label`: $($ofPlans.Count) rows, $(Format-Amount $moved) in the days read, split evenly among $($split.Users -join ', ')."
+        }
+        catch {
+            $reason = ("$($_.Exception.Message)" -split '\r?\n')[0].Trim()
+            if ($reason.Length -gt 300) { $reason = $reason.Substring(0, 300) + '...' }
+            $planUnread += $label
+            Write-Skip "$label`: cost not read, so what $($split.Users -join ', ') cost is not known: $reason"
         }
     }
 }
@@ -207,11 +305,13 @@ if ($mixed) { Write-Skip "Azure bills $slug in more than one currency ($($curren
 $hasYesterday = @($rows | Where-Object { $_.Day -eq $asOfKey }).Count -gt 0
 if (-not $hasYesterday) { Write-Skip "Azure has no cost of $(Format-Day $asOf) for $slug yet: yesterday is not known" }
 
-$unread = @($groups.Keys | Where-Object { -not $read.Contains($_) })
+$unread = @($groups.Keys | Where-Object { -not $read.Contains($_) }) + $planUnread
+# What Azure reports is $rows (the system's number); the entries are of $attributed: the same with the shared plans split.
+$attributed = @($rows) + @($splitRows)
 $unknown = 0
 function Get-Amount([object[]] $Of, [string[]] $Needs) {
-    # yesterday, last7Days and monthToDate of the given rows, and their services by cost; null where a group these
-    # numbers need was not read.
+    # yesterday, last7Days and monthToDate of the given rows, and their services by cost; null where a group (or a
+    # query of shared plans) these numbers need was not read.
     $missing = @($Needs | Where-Object { $unread -contains $_ })
     $amount = [ordered] @{ yesterday = $null; last7Days = $null; monthToDate = $null; topServices = @() }
     if ($mixed -or $missing.Count -gt 0) { $script:unknown += 3; return $amount }
@@ -234,16 +334,67 @@ function Get-Amount([object[]] $Of, [string[]] $Needs) {
     $amount
 }
 
-$others = @($rows | ForEach-Object { & $entryOf $_.Tag } | Where-Object { $_ -ne $shared -and $environments -notcontains $_ } | Sort-Object -Unique)
+$others = @($attributed | ForEach-Object { & $entryOf $_.Tag } | Where-Object { $_ -ne $shared -and $environments -notcontains $_ } | Sort-Object -Unique)
 $entries = @(foreach ($name in @($environments) + $others + $shared) {
         # An environment's resources are in the group of its tier and in the groups of no tier; anything else may be anywhere.
-        $needs = if ($environments -contains $name) { @($groups.Keys | Where-Object { $groups[$_] -in '', $tierOf[$name] }) } else { @($groups.Keys) }
-        $amount = Get-Amount @($rows | Where-Object { (& $entryOf $_.Tag) -eq $name }) $needs
+        $needs = if ($environments -contains $name) { @($groups.Keys | Where-Object { $groups[$_] -in '', $tierOf[$name] }) + $planNeeds[$name] } else { @($groups.Keys) }
+        $amount = Get-Amount @($attributed | Where-Object { (& $entryOf $_.Tag) -eq $name }) $needs
         $entry = [ordered] @{ name = $name }
         foreach ($key in $amount.Keys) { $entry[$key] = $amount[$key] }
         $entry
     })
+# Runtime aks-argocd: each environment's part of the cluster, by what its namespace requests (see the help).
+if ($clusterGroups.Count -gt 0) {
+    $statusUrl = "https://$slug-cluster.$([string] $system.cluster['domain'])/cluster.json"
+    $shares = @{}
+    try {
+        $status = Invoke-RestMethod -Uri $statusUrl -TimeoutSec 30
+        $running = @($status.namespaces | ForEach-Object { $space = [string] $_.name; $_.pods | Where-Object { $_ -and $_.phase -notin 'Succeeded', 'Failed' } | ForEach-Object { [pscustomobject] @{ Space = $space; Cpu = [double] $_.cpu.requests; Memory = [double] $_.memory.requests } } })
+        $allCpu = ($running | Measure-Object -Property Cpu -Sum).Sum
+        $allMemory = ($running | Measure-Object -Property Memory -Sum).Sum
+        if ($allCpu -gt 0 -and $allMemory -gt 0) {
+            foreach ($name in $environments) {
+                $own = @($running | Where-Object { $_.Space -eq "$slug-$name" })
+                $shares[$name] = (((($own | Measure-Object -Property Cpu -Sum).Sum) / $allCpu) + ((($own | Measure-Object -Property Memory -Sum).Sum) / $allMemory)) / 2
+            }
+        }
+        else { Write-Skip "$statusUrl lists no pod that requests CPU and memory: no estimate of each environment's part of the cluster" }
+    }
+    catch {
+        Write-Skip "$statusUrl did not answer ($((("$($_.Exception.Message)" -split '\r?\n')[0]).Trim())): no estimate of each environment's part of the cluster"
+    }
+    if ($shares.Count -gt 0) {
+        # What the cluster costs and no environment's tag claims: the rows of its two groups without the tag.
+        $clusterRows = @(foreach ($group in $clusterGroups) { if ($read.Contains($group)) { $read[$group] | Where-Object { (& $entryOf $_.Tag) -eq $shared } } })
+        $ofCluster = Get-Amount $clusterRows $clusterGroups
+        foreach ($entry in $entries) {
+            if (-not $shares.ContainsKey($entry.name)) { continue }
+            $share = [double] $shares[$entry.name]
+            $part = { param($Amount) if ($null -eq $Amount) { $null } else { [Math]::Round([double] $Amount * $share, 2) } }
+            $entry.estimate = [ordered] @{
+                share       = [Math]::Round($share, 4)
+                yesterday   = & $part $ofCluster.yesterday
+                last7Days   = & $part $ofCluster.last7Days
+                monthToDate = & $part $ofCluster.monthToDate
+            }
+        }
+        Write-Host "Estimated part of the cluster (by requested CPU and memory): $(@($environments | ForEach-Object { '{0} {1:P0}' -f $_, [double] $shares[$_] }) -join ', ')."
+    }
+}
 $total = Get-Amount $rows @($groups.Keys)
+# The entries add up to the system's number to the cent: each is rounded on its own, and the cent or two that leaves
+# over goes to the first environment (to the first entry it does not make negative, when it would do that to an
+# environment that cost nothing). Only where every number is known.
+foreach ($key in 'yesterday', 'last7Days', 'monthToDate') {
+    if ($null -eq $total[$key] -or @($entries | Where-Object { $null -eq $_[$key] }).Count -gt 0) { continue }
+    $remainder = [decimal] $total[$key]
+    foreach ($entry in $entries) { $remainder -= [decimal] $entry[$key] }
+    if ($remainder -eq 0) { continue }
+    $able = @($entries | Where-Object { [decimal] $_[$key] + $remainder -ge 0 })
+    $takes = if ($able.Count -gt 0) { $able[0] } else { $entries[0] }
+    $takes[$key] = [double] ([decimal] $takes[$key] + $remainder)
+    Write-Host "Rounding: $(Format-Amount $remainder) of $key goes to $($takes.name), so that the entries add up to the system's $(Format-Amount $total[$key])."
+}
 $document = [ordered] @{
     generated    = $now.ToString('yyyy-MM-ddTHH:mm:ssZ', [cultureinfo]::InvariantCulture)
     currency     = if ($currencies.Count -eq 1) { $currencies[0] } else { $null }
