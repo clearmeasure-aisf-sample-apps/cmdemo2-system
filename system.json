@@ -103,7 +103,15 @@
         "/",
         "/api/work-orders/status-counts"
       ],
-      "buildPath": "/_build"
+      "buildPath": "/_build",
+      "healthDetailPath": "/_healthcheck/detailed",
+      "dependencies": [
+        {
+          "healthCheck": "LlmGateway",
+          "name": "LLM gateway",
+          "kind": "external"
+        }
+      ]
     },
     {
       "name": "dashboard",
