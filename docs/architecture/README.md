@@ -69,3 +69,9 @@ Source: [12-public-address.puml](12-public-address.puml)
 ![A dashboard of every node (2026-10-04)](13-dashboard.png)
 
 Source: [13-dashboard.puml](13-dashboard.puml)
+
+## What depends on what: the system, its GitOps repositories and its DevOps pipeline (2026-10-06)
+
+![What depends on what: the system, its GitOps repositories and its DevOps pipeline (2026-10-06)](20-dependencies.png)
+
+Source: [20-dependencies.puml](20-dependencies.puml)
