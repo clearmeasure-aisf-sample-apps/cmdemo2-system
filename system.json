@@ -81,7 +81,10 @@
     "url": "https://clearmeasure.octopus.app",
     "spaceId": "Spaces-356",
     "spaceSlug": "cmdemo2-demo",
-    "serviceAccountId": "36f21e86-981d-42b6-90a6-7823b83ad954"
+    "serviceAccountId": "36f21e86-981d-42b6-90a6-7823b83ad954",
+    "approvers": [
+      "jeffreypalermo"
+    ]
   },
   "deployables": [
     {
