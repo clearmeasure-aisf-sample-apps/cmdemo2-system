@@ -104,20 +104,14 @@
         "/api/work-orders/status-counts"
       ],
       "buildPath": "/_build",
-      "healthDetailPath": "/_healthcheck/detailed",
-      "dependencies": [
-        {
-          "healthCheck": "LlmGateway",
-          "name": "LLM gateway",
-          "kind": "external"
-        }
-      ]
+      "healthDetailPath": "/_healthcheck/detailed"
     },
     {
       "name": "dashboard",
       "repository": "cmdemo2-dashboard",
       "hosting": "staticwebapp",
-      "healthPath": "/"
+      "healthPath": "/",
+      "buildPath": "/build-facts.json"
     }
   ],
   "environments": [
