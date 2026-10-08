@@ -18,6 +18,13 @@
     health check: the health check connects to the database, and an hourly question would keep a serverless free-offer
     database awake until its monthly allowance is used up. An app that has no release yet answers on / instead. A
     Free-plan app that idled is given time to start (three attempts).
+
+    A deployable that brings its own runtime (system.json hosting "own"; the variable System.OwnDeployables names
+    them) is no node of the stack: the system creates nothing for it and does not know what it runs on. The report
+    never asks it. An environment in which every deployable is such an application (the stack is to create none
+    there: no variable System.StackDeployables in that environment) has nothing to ask: the run says so and succeeds,
+    and its green says nothing about those applications; "Verify deployable" of the application's own project checks
+    each at every deployment. A stack that reports no node where it is to create a deployable fails the run.
 #>
 [CmdletBinding()]
 param()
@@ -83,6 +90,16 @@ if ($edgeGroup) {
     }
 }
 if ($nodes.Count -eq 0) {
+    # Nothing the system created runs here. That is the design only where every application of the environment brings
+    # its own runtime: the system has such an application (System.OwnDeployables) and the stack is to create no
+    # deployable in this environment (no System.StackDeployables here; octopus/variables.tf). Anywhere else a stack
+    # without a node is a fault, as it was before.
+    $own = @(([string] $OctopusParameters['System.OwnDeployables']) -split ',' | Where-Object { $_ })
+    $expected = @(([string] $OctopusParameters['System.StackDeployables']) -split ',' | Where-Object { $_ })
+    if ($own.Count -gt 0 -and $expected.Count -eq 0) {
+        Write-Highlight "Stack stack-$slug-$environmentName reports no node: what runs in $environmentName brings its own runtime ($($own -join ', ')), which this report does not ask. Step 'Verify deployable' of each one's own project checks it at every deployment."
+        return
+    }
     Fail-Step "Stack stack-$slug-$environmentName reports no node."
 }
 

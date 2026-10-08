@@ -26,6 +26,8 @@
       environments it exists in, the first one among them), alwaysOn and database (true or false), alwaysOnEnvironments
       (environments of the deployable, with alwaysOn true), cpu, settings and
       environmentSettings (environment variable to text), urlSetting, and secrets (name, env, generate; never a value).
+    - azure.appEnvironment, where present (the system owns its Container Apps environment), has the seed's shape, and
+      then no environment chooses a placement of its own and every deployable is a container app.
 #>
 [CmdletBinding()]
 param(
@@ -90,9 +92,36 @@ foreach ($deployable in @($system.deployables)) {
     }
 }
 
+# azure.appEnvironment (the seed's output with the demo file's azure.appEnvironment "system"): the system's one Container
+# Apps environment, which every environment runs its container apps in (infra/main.bicep). It carries what the
+# templates read, and the environments then choose no placement of their own: no appLocation, no
+# sharesAppEnvironmentWith. Its deployables run on Container Apps (an App Service or static deployable has no
+# Container Apps environment to share).
+if ($system.azure.ContainsKey('appEnvironment')) {
+    $appEnvironment = $system.azure.appEnvironment
+    $shape = $appEnvironment -is [Collections.IDictionary] -and
+        @('name', 'id', 'resourceGroup', 'location', 'defaultDomain' | Where-Object { -not ($appEnvironment.ContainsKey($_) -and $appEnvironment[$_] -is [string] -and $appEnvironment[$_]) }).Count -eq 0
+    Test-Rule 'azure.appEnvironment' $shape 'the seed output: name, id, resourceGroup, location and defaultDomain of the system Container Apps environment'
+    # mode (the demo file's azure.appEnvironmentMode): standard, or express for an Azure Container Apps express
+    # environment; left out by a seed older than the choice, which made a standard one.
+    Test-Rule 'azure.appEnvironment mode' (-not ($appEnvironment -is [Collections.IDictionary]) -or -not $appEnvironment.ContainsKey('mode') -or @('standard', 'express') -ccontains [string] $appEnvironment.mode) 'standard or express'
+    if ($shape) {
+        Test-Rule 'azure.appEnvironment id' ([string] $appEnvironment.id -cmatch "^/subscriptions/[^/]+/resourceGroups/$([regex]::Escape([string] $appEnvironment.resourceGroup))/providers/Microsoft\.App/managedEnvironments/$([regex]::Escape([string] $appEnvironment.name))$") 'the resource ID of a managed environment named name, in resourceGroup'
+    }
+    foreach ($environment in @($system.environments)) {
+        foreach ($key in 'appLocation', 'sharesAppEnvironmentWith') {
+            Test-Rule "environment $($environment.name) without $key" (-not $environment.ContainsKey($key)) "with azure.appEnvironment every environment runs in the system's Container Apps environment; remove $key"
+        }
+    }
+    foreach ($deployable in @($system.deployables)) {
+        Test-Rule "deployable $($deployable.name) on Container Apps" (-not $deployable.ContainsKey('hosting') -or $deployable.hosting -cin 'containerapp', 'own') "with azure.appEnvironment every deployable is a container app; '$($deployable['hosting'])' has no place in it"
+    }
+}
+
 # Where a deployable runs: infra/main.bicep and octopus/main.tf have a module and an "Update deployable" step per
-# hosting, and a value they do not know would get neither.
-$hostings = @('containerapp', 'appservice', 'staticwebapp')
+# hosting, and a value they do not know would get neither. "own": the application brings its runtime (infra/ has
+# nothing for it; its project runs the deploy.ps1 and verify.ps1 of its release's package).
+$hostings = @('containerapp', 'appservice', 'staticwebapp', 'own')
 foreach ($deployable in @($system.deployables)) {
     if ($deployable.ContainsKey('hosting')) {
         Test-Rule "deployable $($deployable.name) hosting" ($hostings -ccontains [string] $deployable.hosting) "'$($deployable.hosting)' is not one of $($hostings -join ', ') (containerapp when left out)"
