@@ -29,7 +29,7 @@ Each dashboard shows all three environments. Add `#runtime/tdd`, `#runtime/uat` 
 2. Sign in to Octopus and to the Azure portal now. Both ask for a sign-in, and a sign-in in front of a class costs a minute.
 3. On a dashboard, read the header. It must say "All 8 nodes healthy" (three Front Door endpoints and five web apps). The browser tab's title says the same.
 4. On each environment, read the banner: "Expected to serve traffic: westus3 (primary)", "Front Door agrees: it is healthy.", "Pinned 2.4.18", "In sync: all 2 nodes run 2.4.18." (the version will differ; tdd has one node and says "In sync: westus3 runs 2.4.18.").
-5. Use a browser window at least 1400 px wide; at 1300 px the diagram is cut off on the right. On the Runtime view "Fit to width" is already on (the button is black, like the chosen environment): do not press it. A press shows the diagram at its actual size, 1880 px wide, which scrolls sideways; a second press brings it back.
+5. Use a browser window at least 1400 px wide; at 1300 px the diagram is cut off on the right. The Runtime view opens with the diagram fitted to the page. The button at the right says "Actual size": leave it. A press shows the diagram 1880 px wide, which scrolls sideways; the button then says "Fit to width" and a second press brings it back.
 6. Leave "Probe" on "Health check". "Liveness" hides the health check marks and the database's state.
 7. Open the fleet page and read cmdemo2's card, so that its state is no surprise (a card that says "BEHIND THE STANDARD" or "NEEDS ATTENTION" names the reason under it).
 8. Decide who starts the failover test in step 5: you, signed in to Octopus, or the system's owner on your word. Check that the person can run runbooks in the space (not verified here).
@@ -57,7 +57,7 @@ If slow or red: a first answer after idle took 0.3 to 1.2 seconds here. If a til
 
 ## 2. The Runtime view (5 min)
 
-1. On the tdd dashboard, click the tab "Runtime", then the button "prod". Address: https://calm-wave-0b8361f10.6.azurestaticapps.net/#runtime/prod . Leave "Fit to width" as it is: it is on.
+1. On the tdd dashboard, click the tab "Runtime", then the button "prod". Address: https://calm-wave-0b8361f10.6.azurestaticapps.net/#runtime/prod . The diagram is fitted to the page; leave the button "Actual size" alone.
    - Say: "Same checks, drawn as a C4 deployment diagram. The boxes were drawn when the dashboard was deployed. The colours, words and numbers are live."
 2. Point at the frames, left to right.
    - "rg-cmdemo2-edge" with "afd-cmdemo2 [Front Door profile, Standard: global]" and the endpoint "cmdemo2-prod-ui".
@@ -94,7 +94,7 @@ If slow or red: if the numbers do not move, wait for the next check (10 s) or pr
    - Point at the first line: "build 2.4.18", "commit 7053d58", "built 41 h ago", "build run".
    - Point at the rest: "82,655 lines in 1,114 files" with the language bar, "Tests 1,560: 1,070 unit, 339 integration, 151 acceptance", "Coverage 90 % of lines, 81.4 % of branches", "Complexity average 2, worst 42 (1,379 methods)", "CRAP worst 6, none over 6", "Qodana 1 problem" (with a warning mark).
    - Say: "The running app answers these numbers itself, at `/_build`. They are the facts of the build that produced this exact binary, not of the latest commit."
-   - Below the "Delivery" cards is a second card "Code", "dashboard (this page)": "build 1.0.28", "19,652 lines in 133 files", "Tests 783 unit", "Coverage 75.6 % of lines, 65.9 % of branches". Say: "The dashboard holds itself to the same rule: it publishes the facts of its own build."
+   - Below the "Delivery" cards is a second card "Code", "dashboard (this page)": "build 1.0.30", "19,652 lines in 133 files", "Tests 783 unit", "Coverage 75.6 % of lines, 65.9 % of branches". Say: "The dashboard holds itself to the same rule: it publishes the facts of its own build."
 2. Click "commit 7053d58". It opens the commit in cmdemo2-workorders on GitHub (no sign-in).
    - It came from pull request 8: https://github.com/clearmeasure-aisf-sample-apps/cmdemo2-workorders/pull/8
 3. Go back and click "build run". It opens the run "2.4.18 • Build • master" of the workflow "Build".
@@ -108,10 +108,10 @@ If slow or red: if the numbers do not move, wait for the next check (10 s) or pr
    - Point at the rows `system.json`, `environments/<env>/versions.json`, `infra/`, `octopus/`, `scripts/`, and at the column "Written by".
    - If you open `system.json`, scroll to `deployables` and `environments`. The file also holds the Azure identifiers of the system; skip that block.
 6. Open the pin of prod: https://github.com/clearmeasure-aisf-sample-apps/cmdemo2-system/blob/main/environments/prod/versions.json
-   - It holds two lines: `"dashboard": "1.0.28"` and `"ui": "2.4.18"`.
+   - It holds two lines: `"dashboard": "1.0.30"` and `"ui": "2.4.18"`.
    - Say: "This file is the GitOps pin. Git says prod runs ui 2.4.18. The dashboard reads this file and compares it with what the nodes answer: 'Pinned 2.4.18', 'In sync: all 2 nodes run 2.4.18.'"
 7. On the Health tab, click "Pin history" in prod's banner. It opens the commits of that file.
-   - Point at messages such as "Pin dashboard 1.0.28 in prod (Deployments-…)", all by the machine user.
+   - Point at messages such as "Pin dashboard 1.0.30 in uat (Deployments-…)", all by the machine user.
    - Say: "People never edit this file. Octopus commits the pin as the first step of a deployment, and reverts it if a later step fails. The history of this file is the history of prod."
 8. Optional: open the picture of the whole chain, "What depends on what": https://github.com/clearmeasure-aisf-sample-apps/cmdemo2-system/blob/main/docs/architecture/20-dependencies.png . The README of that folder does not list this picture; open the file itself.
 
@@ -173,7 +173,6 @@ Afterwards (1 min):
 1. In Octopus, open the run's task summary. It has two highlighted lines; in the rehearsal on 2026-10-08 they were "Failover of ui in uat: https://cmdemo2-uat-ui-gjfyh5dcf2e2aagg.z02.azurefd.net answered from the standby (eastus2) 47 s after app-cmdemo2-uat-ui stopped; 6 of 8 requests failed meanwhile." and "Failback of ui in uat: served by the primary (westus3) again 106 s after it was started; 0 of 28 requests failed meanwhile." (read from the task's log, not on the Octopus screen).
 2. Say: "The claim 'we have a standby' is now a number with a date. This runbook is also scheduled monthly in uat, so the number never gets old."
 3. The line "Last failover test" on the dashboard changes only after the workflow "delivery" has run again (hourly). Do not wait for it.
-4. Reload the dashboard now. In the rehearsal on 2026-10-08 the page that had watched the test kept two wrong colours after the failback, until it was reloaded: the mark "serving traffic" on westus3 stayed red and "standby: ready" on eastus2 stayed green. The words were right.
 
 Timing: in the rehearsal on 2026-10-08 the runbook measured 47 s to the standby (40 s and 44 s in the two tests before, by the dashboard's line) and 106 s for the way back; the task took 4 minutes in all. On the page the run took 2 min 26 s from the first event to the failback.
 
