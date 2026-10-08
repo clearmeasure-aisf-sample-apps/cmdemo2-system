@@ -5,8 +5,11 @@
 #                         in a system with a database
 #   Health report         hourly, every environment: asks every node the environment's stack reports and its public
 #                         address, one line each; the last run per environment is the system's health in Octopus
-#                         (CAP-076). A deployable with hosting "own" is no node of the stack: an environment with
-#                         nothing else says so and succeeds
+#                         (CAP-076). A deployable with hosting "own" is no node of the stack: the report asks the
+#                         nodes its application recorded (environments/<env>/nodes.json, read from the repository's
+#                         public address, without a token), once an hour, which wakes a node that scaled to zero; a
+#                         record with "healthReport": false is left alone. An environment with nothing to ask says
+#                         so and succeeds
 #   Failover test         only with a standby region (environments[].standbyLocation): stops the primary app and times
 #                         the Front Door endpoint's switch to the standby and back (CAP-047); it may run in every
 #                         environment with a standby, and is scheduled monthly in the nonprod ones
