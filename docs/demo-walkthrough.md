@@ -94,7 +94,7 @@ If slow or red: if the numbers do not move, wait for the next check (10 s) or pr
    - Point at the first line: "build 2.4.22", "commit a23e527", "built 43 min ago", "build run".
    - Point at the rest: "82,817 lines in 1,114 files" with the language bar, "Tests 1,588: 1,098 unit, 339 integration, 151 acceptance", "Coverage 90.1 % of lines, 81.8 % of branches", "Complexity average 2, worst 42 (1,386 methods)", "CRAP worst 6, none over 6", "Qodana 1 problem" (with a warning mark).
    - Say: "The running app answers these numbers itself, at `/_build`. They are the facts of the build that produced this exact binary, not of the latest commit."
-   - Below the "Delivery" cards is a second card "Code", "dashboard (this page)": "build 1.0.30", "19,652 lines in 133 files", "Tests 783 unit", "Coverage 75.6 % of lines, 65.9 % of branches". Say: "The dashboard holds itself to the same rule: it publishes the facts of its own build."
+   - Below the "Delivery" cards is a second card "Code", "dashboard (this page)": "build 1.0.34", "20,889 lines in 137 files", "Tests 846 unit", "Coverage 76 % of lines, 66.2 % of branches". Say: "The dashboard holds itself to the same rule: it publishes the facts of its own build."
 2. Click "commit a23e527". It opens the commit in cmdemo2-workorders on GitHub (no sign-in).
    - It came from pull request 10: https://github.com/clearmeasure-aisf-sample-apps/cmdemo2-workorders/pull/10
 3. Go back and click "build run". It opens the run "2.4.22 • Build • master" of the workflow "Build".
@@ -108,10 +108,10 @@ If slow or red: if the numbers do not move, wait for the next check (10 s) or pr
    - Point at the rows `system.json`, `environments/<env>/versions.json`, `infra/`, `octopus/`, `scripts/`, and at the column "Written by".
    - If you open `system.json`, scroll to `deployables` and `environments`. The file also holds the Azure identifiers of the system; skip that block.
 6. Open the pin of prod: https://github.com/clearmeasure-aisf-sample-apps/cmdemo2-system/blob/main/environments/prod/versions.json
-   - It holds two lines: `"dashboard": "1.0.30"` and `"ui": "2.4.22"`.
+   - It holds two lines, on 2026-10-08 `"dashboard": "1.0.28"` and `"ui": "2.4.22"`. The dashboard in prod is behind tdd and uat (1.0.34) while a promotion waits for a person to sign off; the page says so next to the environment buttons: "cmdemo2-dashboard 1.0.30 waits for a sign-off in prod".
    - Say: "This file is the GitOps pin. Git says prod runs ui 2.4.22. The dashboard reads this file and compares it with what the nodes answer: 'Pinned 2.4.22', 'In sync: all 2 nodes run 2.4.22.'"
 7. On the Health tab, click "Pin history" in prod's banner. It opens the commits of that file.
-   - Point at messages such as "Pin dashboard 1.0.30 in uat (Deployments-…)", all by the machine user.
+   - Point at messages such as "Pin dashboard 1.0.34 in uat (Deployments-…)", all by the machine user.
    - Say: "People never edit this file. Octopus commits the pin as the first step of a deployment, and reverts it if a later step fails. The history of this file is the history of prod."
 8. Optional: open the picture of the whole chain, "What depends on what": https://github.com/clearmeasure-aisf-sample-apps/cmdemo2-system/blob/main/docs/architecture/20-dependencies.png . The README of that folder does not list this picture; open the file itself.
 
@@ -189,7 +189,7 @@ If slow or red:
 1. Availability. On the Health tab, under an environment's name: "Availability Healthy in 24 of 24 hourly checks (100 %) in 24 hours", "54 of 55 in 7 days", "last failure 30 h ago", and the sentence "Hourly checks by the pipeline, not continuous monitoring."
    - Say: "An hourly runbook, 'Health report', asks every node and the public address. This line counts its runs. The page says itself that this is not monitoring: an outage between two reports is not counted."
    - If asked about the one failure in uat and prod: it ended on 2026-10-06 at about 18:14 UTC. The page does not say why. Not shown here.
-2. Cost. In the header: "Cost of the system $2.97 yesterday · $9.26 in 7 days · $9.26 this month · as of 2026-10-07". Under each environment: "Cost" and "Most this month: …". After prod on the Health tab: "shared", "no environment".
+2. Cost. In the header: "Cost of the system $3.26 yesterday · $9.54 in 7 days · $9.54 this month · as of 2026-10-07 (UTC)". Under each environment: "Cost" and "Most this month: …". After prod on the Health tab: "shared", "no environment".
    - Say: "Cost per environment, by the tag `environment` on the resources. It is a day old, and the page says so. What no environment owns is listed apart: mostly Front Door."
    - "yesterday" is the last complete day in UTC (hover the line), so in a US evening it is the day still on the clock.
 3. Capability checks. Open https://github.com/clearmeasure-aisf-sample-apps/cmdemo2-system/actions/workflows/capabilities.yml
