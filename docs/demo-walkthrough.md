@@ -108,7 +108,7 @@ If slow or red: if the numbers do not move, wait for the next check (10 s) or pr
    - Point at the rows `system.json`, `environments/<env>/versions.json`, `infra/`, `octopus/`, `scripts/`, and at the column "Written by".
    - If you open `system.json`, scroll to `deployables` and `environments`. The file also holds the Azure identifiers of the system; skip that block.
 6. Open the pin of prod: https://github.com/clearmeasure-aisf-sample-apps/cmdemo2-system/blob/main/environments/prod/versions.json
-   - It holds two lines, on 2026-10-08 `"dashboard": "1.0.28"` and `"ui": "2.4.22"`. The dashboard in prod is behind tdd and uat (1.0.34) while a promotion waits for a person to sign off; the page says so next to the environment buttons: "cmdemo2-dashboard 1.0.30 waits for a sign-off in prod".
+   - It holds two lines: `"dashboard": "1.0.34"` and `"ui": "2.4.22"`.
    - Say: "This file is the GitOps pin. Git says prod runs ui 2.4.22. The dashboard reads this file and compares it with what the nodes answer: 'Pinned 2.4.22', 'In sync: all 2 nodes run 2.4.22.'"
 7. On the Health tab, click "Pin history" in prod's banner. It opens the commits of that file.
    - Point at messages such as "Pin dashboard 1.0.34 in uat (Deployments-…)", all by the machine user.
@@ -134,7 +134,7 @@ Tell it as one story, with pull request 10 of the app as the example, and show t
    - uat: "Signed off by ai-ops", the reason "Kit templates (capability checks treat a sign-off as at rest; no Azure change in the preview); the app footer shows the commit and no unknown field", "Lead time 36 min", "Compared same as tdd".
    - prod: the same sign-off and reason, "Lead time 54 min".
    - Say: "Who deployed what, when, with whose sign-off and for what reason, and how long a commit took to reach each environment: 24, 36 and 54 minutes. The page reads this from a file the pipeline publishes, `delivery.json` on the branch `status` of the system repository."
-   - Say, if asked who "ai-ops" is: "The operator's automation account. Every sign-off on these cards is automation's, and only with a recorded reason. People who may sign off are named in `system.json` under `octopus.approvers`; it names one today."
+   - Say, if asked who "ai-ops" is: "The operator's automation account. It signs off only with a recorded reason. People who may sign off are named in `system.json` under `octopus.approvers`; it names one today, and he signed off one promotion to prod himself: cmdemo2-dashboard 1.0.30 on 2026-10-08, which waited sixteen hours for him. While it waited, the dashboards said 'cmdemo2-dashboard 1.0.30 waits for a sign-off in prod' next to the environment buttons. The cards show the newest deployment of each environment; the earlier one is in the project's history in Octopus."
 5. Point at the other two "Delivery" cards per environment: "the system (infrastructure and pipeline)" and "dashboard".
    - Say: "Infrastructure travels the same road. A merge to cmdemo2-system makes a release of the project cmdemo2-system; Octopus applies `infra/` to tdd, then to uat and prod after a sign-off."
 6. Point at "Last 7 days" on the cards of ui: for example "12 deployments, 3 failed" in tdd and "6 deployments, 1 failed" in uat, each with a warning mark, and "5 deployments, none failed" in prod.
