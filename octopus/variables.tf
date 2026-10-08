@@ -165,13 +165,15 @@ resource "octopusdeploy_variable" "azure_account" {
 }
 
 # GitHub.Token reaches only the steps whose script reads it: in the system project "Apply environment" (the versions
-# of versions.json), in a deployable's project "Pin version" and "Revert pin" (the commit to versions.json) and, for a
-# static site, "Update deployable" (system.json). Octopus hands a variable scoped to steps to no other step and to no
-# runbook. The steps that run an application's own scripts ("Update deployable", "Verify deployable" and "Revert
-# deployable" of a deployable with hosting "own": scripts/invoke-application.ps1) are not among them, and neither are
-# the steps that run an application's assemblies (the migration, the seeder, the acceptance tests). A step that
-# starts to read the token is added here, and tests/test-token-scope.ps1 in the kit fails until it is; a step that
-# runs code of an application is never added.
+# of versions.json), in a deployable's project "Pin version" and "Revert pin" (the commit to versions.json), for a
+# static site "Update deployable" (system.json and the recorded nodes) and, for a deployable with hosting "own",
+# "Record nodes" and "Record nodes after revert" (the commit to nodes.json; they run nothing of the application's).
+# Octopus hands a variable scoped to steps to no other step and to no runbook. The steps that run an application's
+# own scripts ("Update deployable", "Verify deployable", "Revert deployable" and "Verify revert" of such a
+# deployable: scripts/invoke-application.ps1) are not among them, and neither are the steps that run an
+# application's assemblies (the migration, the seeder, the acceptance tests). A step that starts to read the token is
+# added here, and tests/test-token-scope.ps1 in the kit fails until it is; a step that runs code of an application is
+# never added.
 locals {
   token_steps = merge(
     { system = [octopusdeploy_process_step.system_apply.action_id] },
@@ -179,6 +181,7 @@ locals {
       for name in keys(local.deployables) : name => concat(
         [octopusdeploy_process_step.pin[name].action_id, octopusdeploy_process_step.revert_pin[name].action_id],
         contains(keys(local.static_deployables), name) ? [octopusdeploy_process_step.deploy_staticwebapp[name].action_id] : [],
+        contains(keys(local.own_deployables), name) ? [octopusdeploy_process_step.record_nodes[name].action_id, octopusdeploy_process_step.record_reverted_nodes[name].action_id] : [],
       )
     }
   )
@@ -192,7 +195,7 @@ resource "octopusdeploy_variable" "github_token" {
   type            = "Sensitive"
   is_sensitive    = true
   sensitive_value = var.github_token
-  description     = "Reads environments/<env>/versions.json from main and, in deployable projects, commits the pin; the dashboard's deployment reads system.json with it. Scoped to the steps that read it. From repository secret OCTOPUS_GITHUB_TOKEN."
+  description     = "Reads environments/<env>/versions.json from main and, in deployable projects, commits the pin; step Record nodes of a deployable with hosting own commits its nodes (environments/<env>/nodes.json); the dashboard's deployment reads system.json and those nodes with it. Scoped to the steps that read it. From repository secret OCTOPUS_GITHUB_TOKEN."
 
   scope {
     actions = local.token_steps[each.key]
