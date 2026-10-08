@@ -807,6 +807,11 @@ if (-not $entry) {
 $staticSite = [string] $entry.staticSite
 $url = ([string] $entry.url).TrimEnd('/')
 
+# GitHub.Token is scoped to the steps that read it (octopus/variables.tf, token_steps): a step that is not among them
+# reads it empty, and says so here instead of being refused by GitHub.
+if (-not [string] $OctopusParameters['GitHub.Token']) {
+    Fail-Step "GitHub.Token did not reach step '$([string] $OctopusParameters['Octopus.Step.Name'])': octopus/variables.tf hands it only to the steps of local.token_steps. A release made before a step was replaced has that step under its old id and gets no token there: make a new release."
+}
 # system.json on main, through the API (raw.githubusercontent.com caches for minutes): the current desired state of
 # the whole system, not the commit of an older release.
 $headers = @{
