@@ -32,7 +32,7 @@ In Octopus, two kinds of project run against these environments:
 - **`<slug>-<deployable>`** deploys one app release in four steps:
   1. pin the version in Git;
   2. migrate the database;
-  3. update the container app;
+  3. update the app where its `hosting` says it runs (a container app, a web app or a static site);
   4. verify.
 
 ## Common changes
