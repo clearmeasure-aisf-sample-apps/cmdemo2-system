@@ -148,5 +148,13 @@
       ],
       "standbyLocation": "eastus2"
     }
-  ]
+  ],
+  "github": {
+    "app": {
+      "id": 5245668,
+      "slug": "cmdemo2-system",
+      "clientId": "Iv23liFl5NjLwANp5dCp",
+      "installationId": 169461285
+    }
+  }
 }
