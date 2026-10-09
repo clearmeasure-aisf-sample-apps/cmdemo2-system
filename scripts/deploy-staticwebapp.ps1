@@ -90,7 +90,9 @@
        dependencies the diagram has none of this. Every node, region and Front Door, database or dependency
        relationship has a slot, a transparent image of a fixed size, where the dashboard draws the live values (a web
        app's slot holds seven lines under its badge: version, pin, traffic, failures, process, uptime and role, and
-       an eighth, the marks of its detailed health check, for a deployable with healthDetailPath). The script downloads the PlantUML release jar of the pinned version from GitHub,
+       an eighth, the marks of its detailed health check, for a deployable with healthDetailPath; then two more, as
+       the slot of every node a deployment changes has: what is being deployed there and what just happened, in
+       words, from deployments.json). The script downloads the PlantUML release jar of the pinned version from GitHub,
        verifies its SHA-256, renders every diagram in one Java process (layout engine smetana: no Graphviz; security
        profile SANDBOX) and checks that each SVG has every element the manifest names; a missing one fails the step.
        Java's output is logged as information; the download and the render are timed.
@@ -732,13 +734,19 @@ function ConvertTo-RuntimeDiagram {
     # A web app's tile: the badge, seven lines 15 px apart (version, pin, traffic, failures, process, uptime, role)
     # and the history strip; one line more, the marks of the detailed health check, for a deployable with
     # healthDetailPath. A Front Door endpoint's has three lines; a database's, a static site's and a dependency's one.
+    # A node a deployment changes (a web app, a Front Door endpoint, a static site: every node with a deployable) has
+    # two lines more, 30 px: the activity lines, where the dashboard says in words what is being deployed there, a
+    # deployment freeze and the last deployment that ended (deployments.json). They are the last lines of a tile, so
+    # a diagram rendered before them has no row for them and loses nothing else.
     # The widths are what the widest line needs and no more: the diagram of an environment with a standby is five
     # boxes and three number lines wide, and every pixel here is paid for by the page's scale.
     $tileWidth = 232
-    $tileSlot = "<img:$(New-TransparentPng -Width $tileWidth -Height 146)>"
-    $tileSlotWithChecks = "<img:$(New-TransparentPng -Width $tileWidth -Height 161)>"
-    $endpointSlot = "<img:$(New-TransparentPng -Width $tileWidth -Height 98)>"
+    $activityRows = 30
+    $tileSlot = "<img:$(New-TransparentPng -Width $tileWidth -Height (146 + $activityRows))>"
+    $tileSlotWithChecks = "<img:$(New-TransparentPng -Width $tileWidth -Height (161 + $activityRows))>"
+    $endpointSlot = "<img:$(New-TransparentPng -Width $tileWidth -Height (98 + $activityRows))>"
     $smallTileSlot = "<img:$(New-TransparentPng -Width $tileWidth -Height 46)>"
+    $siteSlot = "<img:$(New-TransparentPng -Width $tileWidth -Height (46 + $activityRows))>"
     $regionSlot = "<img:$(New-TransparentPng -Width 190 -Height 22)>"
     # A relationship's number line (the number, its unit and its trend in a frame) and, under it, its role in words
     # ("app queries · 55 background").
@@ -929,7 +937,7 @@ function ConvertTo-RuntimeDiagram {
             foreach ($static in $statics) {
                 $alias = "swa_$(Get-DeployableAlias $static.name)"
                 $site = "swa-$slug-$Environment-$($static.name)"
-                $lines.Add("      Container($alias, $(Get-Quoted $site), $(Get-Quoted "Static Web App: $($static.name)"), $(Get-Quoted $smallTileSlot))")
+                $lines.Add("      Container($alias, $(Get-Quoted $site), $(Get-Quoted "Static Web App: $($static.name)"), $(Get-Quoted $siteSlot))")
                 $address = if ($DashboardUrl[$Environment]) { [string] $DashboardUrl[$Environment] } else { $null }
                 Add-Node ([ordered] @{ alias = $alias; qualifiedName = "sub.rg_tier.$($region.alias).$alias"; kind = 'staticsite'; deployable = [string] $static.name; name = $site; region = $region.name; regionAlias = $region.alias; url = $address }) (Get-PortalLink $(if ($tierGroupId) { "$tierGroupId/providers/Microsoft.Web/staticSites/$site" } else { '' }))
             }
