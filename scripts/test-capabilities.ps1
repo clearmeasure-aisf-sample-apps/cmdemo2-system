@@ -951,6 +951,12 @@ $checks = [ordered] @{
         "deployments.json on branch deployments: $($inFlight.Count) in flight, as in Octopus; $($listed.Count - $inFlight.Count) ended in the last half hour$says"
     }
     'CAP-080' = { $files = @(gh api "repos/$systemRepo/contents/docs/architecture" --jq '.[].name'); $missing = @($files | Where-Object { $_ -like '*.puml' -and $files -notcontains ($_ -replace '\.puml$', '.png') }); Assert-That ($missing.Count -eq 0 -and $files.Count -gt 0) "not rendered: $missing"; "$(@($files | Where-Object { $_ -like '*.png' }).Count) diagrams rendered" }
+    'CAP-089' = {
+        $main = Get-RepoFile $systemRepo 'infra/main.bicep'; $own = Find-RepoFile $systemRepo 'infra/own/main.bicep'
+        Assert-That ($main -match "(?m)^module own 'own/main\.bicep'" -and $own) 'infra/main.bicep does not call infra/own/main.bicep, or the system repository has no such file'
+        $adds = @([regex]::Matches($own, '(?m)^(resource|module) ')).Count
+        "every environment calls the system's own module, which declares $adds resource(s) or module(s) of the system's"
+    }
     'CAP-081' = {
         $build = Get-RepoFile $systemRepo '.github/workflows/system.yml'; $nightly = Get-RepoFile $systemRepo '.github/workflows/capabilities.yml'
         Assert-That ($build -match 'uses: \./\.github/workflows/capabilities\.yml' -and $nightly -match 'schedule:') 'the checks do not run with every system build and nightly'
