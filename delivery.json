@@ -1,0 +1,226 @@
+{
+  "generated": "2026-10-10T17:43:36Z",
+  "environments": [
+    {
+      "name": "tdd",
+      "deployables": [
+        {
+          "name": "ui",
+          "version": "2.4.24",
+          "deployedAt": "2026-10-09T03:35:25Z",
+          "signedOffBy": null,
+          "reason": null,
+          "lastPersonSignOff": null,
+          "commit": "8ce80507b0b5c45d1138c0f7ab495ac7448990ea",
+          "commitAt": "2026-10-09T03:10:24Z",
+          "leadTimeHours": 0.4,
+          "behindFirst": {
+            "versions": 0,
+            "days": 0
+          },
+          "deploymentsLast7Days": 14,
+          "failedLast7Days": 3,
+          "releaseUrl": "https://clearmeasure.octopus.app/app#/Spaces-356/projects/cmdemo2-ui/deployments/releases/2.4.24"
+        },
+        {
+          "name": "dashboard",
+          "version": "1.0.43",
+          "deployedAt": "2026-10-09T09:09:45Z",
+          "signedOffBy": null,
+          "reason": null,
+          "lastPersonSignOff": null,
+          "commit": "9a4728ef73a852cd502f1431d5b13d05a7112542",
+          "commitAt": "2026-10-09T09:03:43Z",
+          "leadTimeHours": 0.1,
+          "behindFirst": {
+            "versions": 0,
+            "days": 0
+          },
+          "deploymentsLast7Days": 23,
+          "failedLast7Days": 3,
+          "releaseUrl": "https://clearmeasure.octopus.app/app#/Spaces-356/projects/cmdemo2-dashboard/deployments/releases/1.0.43"
+        },
+        {
+          "name": "system",
+          "version": "1.0.53",
+          "deployedAt": "2026-10-09T09:03:28Z",
+          "signedOffBy": null,
+          "reason": null,
+          "lastPersonSignOff": null,
+          "commit": "33d62433598382fc9b9b3350f3b65aa0bbd2318c",
+          "commitAt": "2026-10-09T08:54:44Z",
+          "leadTimeHours": 0.1,
+          "behindFirst": {
+            "versions": 0,
+            "days": 0
+          },
+          "deploymentsLast7Days": 50,
+          "failedLast7Days": 5,
+          "releaseUrl": "https://clearmeasure.octopus.app/app#/Spaces-356/projects/cmdemo2-system/deployments/releases/1.0.53"
+        }
+      ],
+      "health": {
+        "last24Hours": {
+          "reports": 24,
+          "healthy": 24
+        },
+        "last7Days": {
+          "reports": 101,
+          "healthy": 101
+        },
+        "lastFailure": null
+      }
+    },
+    {
+      "name": "uat",
+      "deployables": [
+        {
+          "name": "ui",
+          "version": "2.4.24",
+          "deployedAt": "2026-10-09T03:49:14Z",
+          "signedOffBy": "ai-ops",
+          "reason": "Footer and login page: the version never shows the commit the SDK appends to it (cmdemo2-workorders 11)",
+          "lastPersonSignOff": null,
+          "commit": "8ce80507b0b5c45d1138c0f7ab495ac7448990ea",
+          "commitAt": "2026-10-09T03:10:24Z",
+          "leadTimeHours": 0.6,
+          "behindFirst": {
+            "versions": 0,
+            "days": 0
+          },
+          "deploymentsLast7Days": 8,
+          "failedLast7Days": 1,
+          "releaseUrl": "https://clearmeasure.octopus.app/app#/Spaces-356/projects/cmdemo2-ui/deployments/releases/2.4.24"
+        },
+        {
+          "name": "dashboard",
+          "version": "1.0.43",
+          "deployedAt": "2026-10-09T09:18:23Z",
+          "signedOffBy": "ai-ops",
+          "reason": "Kit templates b80aa41: the dashboard says in words what is happening to a node (who started a deployment, what it waits for, freezes); preview 0 changes in tdd, uat and prod",
+          "lastPersonSignOff": null,
+          "commit": "9a4728ef73a852cd502f1431d5b13d05a7112542",
+          "commitAt": "2026-10-09T09:03:43Z",
+          "leadTimeHours": 0.2,
+          "behindFirst": {
+            "versions": 0,
+            "days": 0
+          },
+          "deploymentsLast7Days": 19,
+          "failedLast7Days": 0,
+          "releaseUrl": "https://clearmeasure.octopus.app/app#/Spaces-356/projects/cmdemo2-dashboard/deployments/releases/1.0.43"
+        },
+        {
+          "name": "system",
+          "version": "1.0.53",
+          "deployedAt": "2026-10-09T09:12:38Z",
+          "signedOffBy": "ai-ops",
+          "reason": "Kit templates b80aa41: the dashboard says in words what is happening to a node (who started a deployment, what it waits for, freezes); preview 0 changes in tdd, uat and prod",
+          "lastPersonSignOff": null,
+          "commit": "33d62433598382fc9b9b3350f3b65aa0bbd2318c",
+          "commitAt": "2026-10-09T08:54:44Z",
+          "leadTimeHours": 0.3,
+          "behindFirst": {
+            "versions": 0,
+            "days": 0
+          },
+          "deploymentsLast7Days": 27,
+          "failedLast7Days": 0,
+          "releaseUrl": "https://clearmeasure.octopus.app/app#/Spaces-356/projects/cmdemo2-system/deployments/releases/1.0.53"
+        }
+      ],
+      "health": {
+        "last24Hours": {
+          "reports": 24,
+          "healthy": 24
+        },
+        "last7Days": {
+          "reports": 101,
+          "healthy": 100
+        },
+        "lastFailure": "2026-10-06T18:15:08Z"
+      }
+    },
+    {
+      "name": "prod",
+      "deployables": [
+        {
+          "name": "ui",
+          "version": "2.4.24",
+          "deployedAt": "2026-10-09T04:04:44Z",
+          "signedOffBy": "ai-ops",
+          "reason": "Footer and login page: the version never shows the commit the SDK appends to it (cmdemo2-workorders 11)",
+          "lastPersonSignOff": null,
+          "commit": "8ce80507b0b5c45d1138c0f7ab495ac7448990ea",
+          "commitAt": "2026-10-09T03:10:24Z",
+          "leadTimeHours": 0.9,
+          "behindFirst": {
+            "versions": 0,
+            "days": 0
+          },
+          "deploymentsLast7Days": 7,
+          "failedLast7Days": 0,
+          "releaseUrl": "https://clearmeasure.octopus.app/app#/Spaces-356/projects/cmdemo2-ui/deployments/releases/2.4.24"
+        },
+        {
+          "name": "dashboard",
+          "version": "1.0.43",
+          "deployedAt": "2026-10-09T09:27:05Z",
+          "signedOffBy": "ai-ops",
+          "reason": "Kit templates b80aa41: the dashboard says in words what is happening to a node (who started a deployment, what it waits for, freezes); preview 0 changes in tdd, uat and prod",
+          "lastPersonSignOff": {
+            "version": "1.0.30",
+            "by": "jeffreypalermo",
+            "at": "2026-10-08T21:12:41Z",
+            "reason": null,
+            "releaseUrl": "https://clearmeasure.octopus.app/app#/Spaces-356/projects/cmdemo2-dashboard/deployments/releases/1.0.30"
+          },
+          "commit": "9a4728ef73a852cd502f1431d5b13d05a7112542",
+          "commitAt": "2026-10-09T09:03:43Z",
+          "leadTimeHours": 0.4,
+          "behindFirst": {
+            "versions": 0,
+            "days": 0
+          },
+          "deploymentsLast7Days": 19,
+          "failedLast7Days": 0,
+          "releaseUrl": "https://clearmeasure.octopus.app/app#/Spaces-356/projects/cmdemo2-dashboard/deployments/releases/1.0.43"
+        },
+        {
+          "name": "system",
+          "version": "1.0.53",
+          "deployedAt": "2026-10-09T09:22:24Z",
+          "signedOffBy": "ai-ops",
+          "reason": "Kit templates b80aa41: the dashboard says in words what is happening to a node (who started a deployment, what it waits for, freezes); preview 0 changes in tdd, uat and prod",
+          "lastPersonSignOff": null,
+          "commit": "33d62433598382fc9b9b3350f3b65aa0bbd2318c",
+          "commitAt": "2026-10-09T08:54:44Z",
+          "leadTimeHours": 0.5,
+          "behindFirst": {
+            "versions": 0,
+            "days": 0
+          },
+          "deploymentsLast7Days": 26,
+          "failedLast7Days": 1,
+          "releaseUrl": "https://clearmeasure.octopus.app/app#/Spaces-356/projects/cmdemo2-system/deployments/releases/1.0.53"
+        }
+      ],
+      "health": {
+        "last24Hours": {
+          "reports": 24,
+          "healthy": 24
+        },
+        "last7Days": {
+          "reports": 101,
+          "healthy": 100
+        },
+        "lastFailure": "2026-10-06T18:14:27Z"
+      }
+    }
+  ],
+  "failover": {
+    "environment": "uat",
+    "at": "2026-10-09T02:25:54Z",
+    "seconds": 62
+  }
+}
