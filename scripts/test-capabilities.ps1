@@ -80,6 +80,14 @@ function Find-RepoFile([string] $Repo, [string] $Path) {
     if ($code -eq 0) { return [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String((($answer -join '') -replace '\s', ''))) }
     if (($answer -join ' ') -notmatch 'HTTP 404') { throw "cannot read $Path of ${Repo}: $($answer -join ' ')" }
 }
+function Find-StatusFile([string] $Repo, [string] $Path) {
+    # The text of a file on branch status (what workflow delivery publishes), or nothing when the branch has none.
+    $PSNativeCommandUseErrorActionPreference = $false
+    $answer = @(gh api "repos/$Repo/contents/${Path}?ref=status" --jq .content 2>&1 | ForEach-Object { "$_" })
+    $code = $LASTEXITCODE
+    $PSNativeCommandUseErrorActionPreference = $true
+    if ($code -eq 0) { return [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String((($answer -join '') -replace '\s', ''))) }
+}
 function Find-PublicFile([string] $Repo, [string] $Path) {
     # The text of a file on main as anyone reads it: from the repository's public address, without a credential and
     # without following a redirect. Nothing when that address has none (404: no such file, or a private repository).
@@ -319,6 +327,44 @@ function Get-ListedNode([hashtable] $Topology) {
                 "$($entry['name'])/$($d['name'])/$(([string] $node['url']).TrimEnd('/'))"
             }
         }
+    }
+}
+function Get-UnwatchedBox([hashtable] $Manifest, [hashtable] $Topology, $Containers, [string] $Page = '') {
+    # The boxes of a runtime diagram that would show neither a probe state nor a health line (decision 0038), each as
+    # "<alias> <name>: <why>". Probed by the page: a web app, a Front Door endpoint or a static site whose address the
+    # served topology lists, the page's own site ($Page), and a container app with an address. The database: by the
+    # health check of a probed web app that uses it. A health line: every id of the box has a health in containers.json
+    # of branch status ($Containers, parsed; $null without it). The browser and a dependency, which the system does not
+    # deploy, are not asked for.
+    $probed = [Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
+    if ($Page) { $null = $probed.Add($Page.TrimEnd('/')) }
+    foreach ($entry in @($Topology['environments'] | Where-Object { $_ })) {
+        foreach ($d in @($entry['deployables'] | Where-Object { $_ })) {
+            if ($d['frontDoor']) { $null = $probed.Add(([string] $d['frontDoor']).TrimEnd('/')) }
+            foreach ($node in @($d['nodes'] | Where-Object { $_ -and $_['url'] })) { $null = $probed.Add(([string] $node['url']).TrimEnd('/')) }
+        }
+    }
+    $healthOf = [Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
+    if ($Containers -is [System.Collections.IDictionary] -and $Containers['resources'] -is [System.Collections.IDictionary]) {
+        foreach ($listed in $Containers['resources'].Values) {
+            foreach ($record in @($listed | Where-Object { $_ -is [System.Collections.IDictionary] -and $_['id'] -and $_['health'] -is [System.Collections.IDictionary] })) { $null = $healthOf.Add([string] $record['id']) }
+        }
+    }
+    $boxes = @($Manifest['nodes'] | Where-Object { $_ -is [System.Collections.IDictionary] })
+    $probedAliases = @($boxes | Where-Object { $_['url'] -and $probed.Contains(([string] $_['url']).TrimEnd('/')) } | ForEach-Object { [string] $_['alias'] })
+    foreach ($box in $boxes) {
+        $kind = [string] $box['kind']
+        if ($kind -in 'person', 'dependency') { continue }
+        $boxIds = @($box['ids'] | Where-Object { $_ })
+        if ($boxIds.Count -gt 0 -and @($boxIds | Where-Object { -not $healthOf.Contains([string] $_) }).Count -eq 0) { continue }
+        $watched = switch ($kind) {
+            { $_ -in 'webapp', 'frontdoor', 'staticsite' } { $probedAliases -contains [string] $box['alias'] }
+            'containerapp' { [bool] $box['url'] }
+            'sql' { @($Manifest['edges'] | Where-Object { $_ -is [System.Collections.IDictionary] -and $_['kind'] -eq 'sql' -and $_['to'] -eq $box['alias'] -and $probedAliases -contains [string] $_['from'] }).Count -gt 0 }
+            default { $false }
+        }
+        if ($watched) { continue }
+        "$($box['alias']) $($box['name']): $(if ($boxIds.Count -eq 0) { 'no probe and no resource id' } else { 'no probe, and containers.json on branch status has no health for it' })"
     }
 }
 
@@ -671,15 +717,16 @@ $checks = [ordered] @{
         "metrics of $role arriving in Application Insights in $($on -join ', ')"
     }
     'CAP-075' = {
-        # One page shows every node: the dashboard (the deployable with hosting "staticwebapp") serves the topology its
+        # One page shows every node: the dashboard (hosting "staticwebapp" or "storagewebsite") serves the topology its
         # deployment wrote, and in every environment it runs in, that topology lists every environment of system.json
         # and every node that is known: for each App Service deployable the nodes the naming convention gives (primary,
         # and standby where the environment has a standbyLocation), and for each deployable with hosting "own" the
         # nodes its application reported (environments/<env>/nodes.json on main). A topology older than system.json or
         # than that record fails: deploy the dashboard again.
-        # Its Runtime view has, in runtime/index.json, every environment with a manifest and an SVG the site serves.
-        $dashboard = @($system.deployables | Where-Object { $_['hosting'] -eq 'staticwebapp' }) | Select-Object -First 1
-        if (-not $dashboard) { Skip-Check 'no deployable with hosting staticwebapp yet' }
+        # Its Runtime view has, in runtime/index.json, every environment with a manifest and an SVG the site serves, and
+        # every box of a diagram has a probe state or a health line (Get-UnwatchedBox, decision 0038).
+        $dashboard = @($system.deployables | Where-Object { $_['hosting'] -in 'staticwebapp', 'storagewebsite' }) | Select-Object -First 1
+        if (-not $dashboard) { Skip-Check 'no deployable with hosting staticwebapp or storagewebsite yet' }
         $dashboardName = [string] $dashboard.name
         $recorded = @{}
         if (@($system.deployables | Where-Object { $_['hosting'] -eq 'own' }).Count -gt 0) {
@@ -707,11 +754,65 @@ $checks = [ordered] @{
             $drawn = @($index['environments'] | Where-Object { $_ })
             $undrawn = @($environments | Where-Object { @($drawn | ForEach-Object { [string] $_['name'] }) -notcontains $_ })
             Assert-That ($undrawn.Count -eq 0) "the Runtime view in $e has no diagram of $($undrawn -join ', '): deploy the release of $slug-$dashboardName to $e again"
+            # The dashboard's deployment reads the container apps' addresses from the stacks its deploy identity may
+            # read (its own tier's) and, for the others, from containers.json on branch status, which workflow delivery
+            # writes as the plan identity. A diagram of another tier's environment is held to the stack when that file
+            # has the environment, and not before (a system whose delivery has not written it yet).
+            $tierOfE = [string] (@($system.environments | Where-Object { [string] $_.name -eq $e }) | Select-Object -First 1).tier
+            $statusContainers = $null
+            $statusText = Find-StatusFile $systemRepo 'containers.json'
+            if ($statusText) { $statusContainers = try { $statusText | ConvertFrom-Json -AsHashtable } catch { $null } }
             foreach ($entry in $drawn) {
                 foreach ($file in @([string] $entry['manifest'], [string] $entry['svg'])) {
                     $answer = Invoke-WebRequest -Uri "$url/runtime/$file" -TimeoutSec 120 -SkipHttpErrorCheck
                     Assert-That ($answer.StatusCode -eq 200 -and $answer.RawContentLength -gt 0) "the Runtime view in $e does not serve runtime/$file (HTTP $($answer.StatusCode))"
                 }
+                $drawnEnvironment = [string] $entry['name']
+                $drawnTier = [string] (@($system.environments | Where-Object { [string] $_.name -eq $drawnEnvironment }) | Select-Object -First 1).tier
+                $published = $statusContainers -and $statusContainers['environments'] -is [System.Collections.IDictionary] -and $statusContainers.environments.Contains($drawnEnvironment)
+                if ($drawnTier -ne $tierOfE -and -not $published) { continue }
+                # Every container app the environment's stack has is a box of its diagram.
+                $manifestAnswer = Invoke-WebRequest -Uri "$url/runtime/$([string] $entry['manifest'])" -TimeoutSec 120
+                $manifest = $(if ($manifestAnswer.Content -is [byte[]]) { [Text.Encoding]::UTF8.GetString($manifestAnswer.Content) } else { [string] $manifestAnswer.Content }) | ConvertFrom-Json -AsHashtable
+                $inStack = @(az stack group show --name "stack-$slug-$drawnEnvironment" --resource-group (Get-Group $drawnEnvironment) --query "outputs.deployables.value[?hosting=='containerapp'].name" --output json | ConvertFrom-Json)
+                $boxed = @($manifest['nodes'] | Where-Object { $_ -is [System.Collections.IDictionary] -and $_['kind'] -eq 'containerapp' } | ForEach-Object { [string] $_['deployable'] })
+                $unboxed = @($inStack | Where-Object { $boxed -notcontains $_ })
+                Assert-That ($unboxed.Count -eq 0) "the runtime diagram of $drawnEnvironment in $e has no box for the container app(s) $($unboxed -join ', '): deploy the release of $slug-$dashboardName to $e again"
+                # Everything else the system's resource groups hold is on it too, in every group of azure.resourceGroups:
+                # what is tagged with the environment, and what no environment tag places (no tag, or a tag of no
+                # environment of the system), named by a box or in the list of a box that stands for several of one type.
+                $accounted = [Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
+                foreach ($shown in @($manifest['nodes'] | Where-Object { $_ -is [System.Collections.IDictionary] })) {
+                    if ($shown['name']) { $null = $accounted.Add([string] $shown['name']) }
+                    foreach ($member in @($shown['names'] | Where-Object { $_ })) { $null = $accounted.Add([string] $member) }
+                }
+                foreach ($frame in @($manifest['frames'] | Where-Object { $_ -is [System.Collections.IDictionary] })) { if ($frame['name']) { $null = $accounted.Add([string] $frame['name']) } }
+                $hasEnvironmentFrame = @($manifest['frames'] | Where-Object { $_ -is [System.Collections.IDictionary] -and $_['kind'] -eq 'containerAppsEnvironment' }).Count -gt 0
+                $inGroup = @(foreach ($systemGroup in @($system.azure.resourceGroups.Values | ForEach-Object { [string] $_ } | Where-Object { $_ } | Select-Object -Unique)) {
+                        az resource list --resource-group $systemGroup --query '[].{type:type,name:name,environment:tags.environment}' --output json | ConvertFrom-Json
+                    })
+                # The tag is a set ("tdd,uat"): a shared resource is drawn in each environment it names.
+                $placed = @($inGroup | Where-Object {
+                        $served = @(([string] $_.environment) -split ',' | ForEach-Object { $_.Trim() } | Where-Object { $_ -and $environments -icontains $_ })
+                        $served.Count -eq 0 -or $served -icontains $drawnEnvironment
+                    })
+                $missing = @($placed | Where-Object {
+                        @($_.type -split '/').Count -eq 2 -and $_.type -ne 'Microsoft.Authorization/roleAssignments' -and
+                        -not ($hasEnvironmentFrame -and $_.type -ieq 'Microsoft.App/managedEnvironments') -and
+                        -not $accounted.Contains([string] $_.name)
+                    } | ForEach-Object { $_.name })
+                Assert-That ($missing.Count -eq 0) "the runtime diagram of $drawnEnvironment in $e does not show $($missing -join ', '): deploy the release of $slug-$dashboardName to $e again"
+                # A container app runs, whatever made it (the stack, or infra/own): a box of its own, never one name in
+                # the list of a box of several. Only the apps this diagram places: an app tagged with another environment
+                # is a box of that environment's diagram (cmdemo1, 2026-10-12: tdd's diagram was asked for uat's and
+                # prod's apps).
+                $boxNames = [Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
+                foreach ($node in @($manifest['nodes'] | Where-Object { $_ -is [System.Collections.IDictionary] -and $_['name'] })) { $null = $boxNames.Add([string] $node['name']) }
+                $listedOnly = @($placed | Where-Object { $_.type -ieq 'Microsoft.App/containerApps' -and -not $boxNames.Contains([string] $_.name) } | ForEach-Object { $_.name })
+                Assert-That ($listedOnly.Count -eq 0) "the runtime diagram of $drawnEnvironment in $e has no box of its own for the container app(s) $($listedOnly -join ', '): deploy the release of $slug-$dashboardName to $e again"
+                # Every box shows that what it stands for is online: the page's own probe, or a health line (decision 0038).
+                $unwatched = @(Get-UnwatchedBox $manifest $topology $statusContainers $url)
+                Assert-That ($unwatched.Count -eq 0) "the runtime diagram of $drawnEnvironment in $e has box(es) with neither a probe nor a health line: $($unwatched -join '; '). Without a resource id: deploy a dashboard release made since decision 0038 to $e; without health: run workflow delivery, which reads Resource Health"
             }
             "$e $url"
         }
@@ -779,20 +880,42 @@ $checks = [ordered] @{
         if ($branches -notcontains 'status') { Skip-Check 'workflow delivery has not published branch status yet' }
         $delivery = Get-RepoFile $systemRepo 'delivery.json?ref=status' | ConvertFrom-Json -AsHashtable
         $listed = @($delivery['environments'] | Where-Object { $_ })
+        $reportedApps = 0
         $compared = foreach ($e in $environments) {
             $entry = @($listed | Where-Object { $_['name'] -eq $e }) | Select-Object -First 1
             Assert-That ($null -ne $entry) "delivery.json on branch status does not list $e"
+            $systemSettled = $false
             foreach ($name in @($deployable, 'system')) {
                 $fact = @($entry['deployables'] | Where-Object { $_ -and $_['name'] -eq $name }) | Select-Object -First 1
                 Assert-That ($null -ne $fact) "delivery.json does not list $name in $e"
                 $deployment = Find-LastDeployment "$slug-$(if ($name -eq 'system') { 'system' } else { $name })" $e
                 if (-not $deployment) { continue }
                 $settled = [datetimeoffset] (Invoke-Octopus "/api/tasks/$($deployment.TaskId)").CompletedTime -lt [datetimeoffset]::UtcNow.AddMinutes(-90)
+                if ($name -eq 'system') { $systemSettled = $settled }
                 Assert-That (-not $settled -or [string] $fact['version'] -eq $deployment.Version) "delivery.json says $name $($fact['version']) in $e, Octopus deployed $($deployment.Version): run workflow delivery"
                 "$e $name $($fact['version'])"
             }
+            # Each container app of the environment has what the hourly health reports found for it (health.containerApps,
+            # read from the reports' logs), once the system's last deployment there, which makes and removes the apps,
+            # is 90 minutes old. An environment whose health the file does not have (no runbook, or not read) has none.
+            $apps = @($system.deployables | Where-Object { (-not $_['hosting'] -or $_['hosting'] -eq 'containerapp') -and (-not $_['environments'] -or @($_['environments']) -contains $e) } | ForEach-Object { [string] $_.name })
+            $health = $entry['health']
+            if ($systemSettled -and $apps.Count -gt 0 -and $health -is [System.Collections.IDictionary]) {
+                $facts = @($health['containerApps'] | Where-Object { $_ -is [System.Collections.IDictionary] })
+                $absent = @($apps | Where-Object { @($facts | ForEach-Object { [string] $_['name'] }) -notcontains $_ })
+                Assert-That ($absent.Count -eq 0) "delivery.json has no hourly health report of the container app(s) $($absent -join ', ') in ${e}: run workflow delivery"
+                foreach ($app in $facts) {
+                    $last = $app['last']
+                    Assert-That ($null -eq $last -or ($last -is [System.Collections.IDictionary] -and [string] $last['result'] -cin 'healthy', 'unhealthy', 'unreachable' -and $null -ne $last['at'])) "delivery.json says of $($app['name']) in $e a last hourly result that is none: healthy, unhealthy or unreachable, with its time"
+                    foreach ($window in 'last24Hours', 'last7Days') {
+                        $count = $app[$window]
+                        Assert-That ($null -eq $count -or ($count -is [System.Collections.IDictionary] -and [int] $count['healthy'] -le [int] $count['reports'])) "delivery.json counts more healthy hourly reports than reports of $($app['name']) in $e ($window)"
+                    }
+                }
+                $reportedApps += $facts.Count
+            }
         }
-        "delivery facts on branch status: $(@($compared).Count) deployment(s) match Octopus"
+        "delivery facts on branch status: $(@($compared).Count) deployment(s) match Octopus$(if ($reportedApps -gt 0) { "; the hourly health reports of $reportedApps container app(s)" })"
     }
     'CAP-079' = {
         # Each deployed process says what it was built from: every web app of an App Service deployable with a
@@ -800,7 +923,7 @@ $checks = [ordered] @{
         # count of its lines of code. The quality sections (tests, coverage, complexity, CRAP, analysis) may be null:
         # the Build run's artifacts expire.
         $described = @($system.deployables | Where-Object { $_['hosting'] -eq 'appservice' -and $_['buildPath'] })
-        if ($described.Count -eq 0 -and @($system.deployables | Where-Object { $_['hosting'] -eq 'staticwebapp' -and $_['buildPath'] }).Count -eq 0) { Skip-Check 'no deployable has a buildPath in system.json' }
+        if ($described.Count -eq 0 -and @($system.deployables | Where-Object { $_['hosting'] -in 'staticwebapp', 'storagewebsite' -and $_['buildPath'] }).Count -eq 0) { Skip-Check 'no deployable has a buildPath in system.json' }
         $shown = foreach ($app in $described) {
             foreach ($entry in $system.environments) {
                 $deployment = Find-LastDeployment "$slug-$($app.name)" ([string] $entry.name)
@@ -821,7 +944,7 @@ $checks = [ordered] @{
         }
         # A static deployable (the dashboard) with a buildPath serves its build facts from its own site, and the
         # topology it serves names the path, so the page shows its own Code card. No CORS: the page reads its own origin.
-        $sites = @($system.deployables | Where-Object { $_['hosting'] -eq 'staticwebapp' -and $_['buildPath'] })
+        $sites = @($system.deployables | Where-Object { $_['hosting'] -in 'staticwebapp', 'storagewebsite' -and $_['buildPath'] })
         $shownSites = foreach ($site in $sites) {
             foreach ($e in $environments) {
                 $deployment = Find-LastDeployment "$slug-$($site.name)" $e
@@ -890,8 +1013,8 @@ $checks = [ordered] @{
         # environment that every deployed dashboard serves.
         $declared = @(foreach ($app in $system.deployables) { foreach ($d in @($app['dependencies'] | Where-Object { $_ })) { [string] $d['name'] } })
         if ($declared.Count -eq 0) { Skip-Check 'no deployable declares dependencies in system.json' }
-        $dashboard = @($system.deployables | Where-Object { $_['hosting'] -eq 'staticwebapp' }) | Select-Object -First 1
-        if (-not $dashboard) { Skip-Check 'no deployable with hosting staticwebapp yet' }
+        $dashboard = @($system.deployables | Where-Object { $_['hosting'] -in 'staticwebapp', 'storagewebsite' }) | Select-Object -First 1
+        if (-not $dashboard) { Skip-Check 'no deployable with hosting staticwebapp or storagewebsite yet' }
         $shown = foreach ($e in $environments) {
             if (-not (Find-LastDeployment "$slug-$($dashboard.name)" $e)) { continue }
             $url = "$(az stack group show --name "stack-$slug-$e" --resource-group (Get-Group $e) --query "outputs.deployables.value[?name=='$($dashboard.name)'].url | [0]" --output tsv)".Trim()
@@ -961,6 +1084,28 @@ $checks = [ordered] @{
         $build = Get-RepoFile $systemRepo '.github/workflows/system.yml'; $nightly = Get-RepoFile $systemRepo '.github/workflows/capabilities.yml'
         Assert-That ($build -match 'uses: \./\.github/workflows/capabilities\.yml' -and $nightly -match 'schedule:') 'the checks do not run with every system build and nightly'
         "$($checks.Count) checks, after every system build and nightly"
+    }
+    'CAP-090' = {
+        # The system's own checks (infra/own/test-*.ps1) run in job own of the capability run, as the plan identity alone.
+        $workflow = Get-RepoFile $systemRepo '.github/workflows/capabilities.yml'
+        $job = [regex]::Match($workflow, '(?ms)^  own:\r?\n(.*?)(?=^  \S|\z)').Groups[1].Value
+        Assert-That ($job -match '(?m)^    environment: azure-read\r?$' -and $job -match 'client-id: \$\{\{ vars\.AZURE_CLIENT_ID_PLAN \}\}' -and $job -match '\./scripts/test-own\.ps1') 'capabilities.yml has no job own that runs scripts/test-own.ps1 in environment azure-read as the plan identity'
+        Assert-That ($workflow -match '(?m)^    needs: \[capabilities, own\]\r?$') 'no job of capabilities.yml takes the result of job own into the issue labelled capability'
+        $plan = "id-$slug-plan"
+        $planGroup = [string] $system.azure.resourceGroups.nonprod
+        $subjects = @(az identity federated-credential list --identity-name $plan --resource-group $planGroup --query '[].subject' --output tsv)
+        Assert-That (@($subjects | Where-Object { $_ -like '*:environment:azure-read' }).Count -gt 0) "$plan does not trust environment azure-read of the system repository"
+        Assert-That (@(gh api "repos/$systemRepo/contents/scripts" --jq '.[].name') -contains 'test-own.ps1') 'the system repository has no scripts/test-own.ps1'
+        Assert-That ((Get-RepoFile $systemRepo 'scripts/test-own.ps1') -match 'SKIP own: no infra/own/test-\*\.ps1') 'scripts/test-own.ps1 does not say SKIP for a system without checks of its own'
+        # A system without checks of its own, or without infra/own (runtime aks-argocd), is not behind: GitHub answers 404.
+        $PSNativeCommandUseErrorActionPreference = $false
+        $listed = @(gh api "repos/$systemRepo/contents/infra/own" --jq '.[].name' 2>&1 | ForEach-Object { "$_" })
+        $code = $LASTEXITCODE
+        $PSNativeCommandUseErrorActionPreference = $true
+        if ($code -ne 0 -and ($listed -join ' ') -notmatch 'HTTP 404') { throw "cannot list infra/own of ${systemRepo}: $($listed -join ' ')" }
+        $own = @(if ($code -eq 0) { $listed | Where-Object { $_ -cmatch '^test-.*\.ps1$' } })
+        if ($own.Count -eq 0) { return "job own in azure-read as $plan; no infra/own/test-*.ps1, so it says SKIP own" }
+        "job own runs $($own -join ', ') in $($environments -join ', '), in azure-read as $plan"
     }
 }
 
@@ -1073,3 +1218,6 @@ if ($failed -gt 0) {
     exit 1
 }
 Write-Host "All $($ids.Count - $skipped) checked capabilities are proven$skippedNote."
+# Said as an exit code: a workflow step in GitHub's pwsh shell ends with the exit code of the last program the script
+# ran, which may be one whose refusal was expected and handled (write-delivery.ps1 failed its workflow that way).
+exit 0
