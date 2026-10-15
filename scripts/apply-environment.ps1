@@ -594,3 +594,7 @@ foreach ($endpoint in $endpoints) {
     Set-OctopusVariable -name "FrontDoorUrl.$($endpoint.name)" -value $endpoint.url
 }
 Write-Highlight "Capabilities of ${environmentName}: $($stack.outputs.capabilities.value -join ', ')"
+# Said as an exit code: Octopus ends the step with the exit code of the last program the script ran, which may be one
+# whose refusal was expected and handled (a dormant system's edge stack is looked for in a group that is gone:
+# cmdemo2, release 1.0.61 in tdd, 2026-10-15, failed after everything had been applied).
+exit 0
