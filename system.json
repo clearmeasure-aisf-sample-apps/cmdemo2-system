@@ -74,7 +74,8 @@
     },
     "frontDoor": {
       "profile": "afd-cmdemo2",
-      "resourceGroup": "rg-cmdemo2-edge"
+      "resourceGroup": "rg-cmdemo2-edge",
+      "dormant": true
     }
   },
   "octopus": {
