@@ -81,9 +81,37 @@ function Get-DesiredVersion {
     return $text | ConvertFrom-Json -AsHashtable
 }
 
+function Find-EnvironmentVault {
+    # The name of this environment's vault when it exists, or $null: from the stack's own resources, else the vault in
+    # the resource group that carries this system's and this environment's tags (a resource group holds several
+    # environments). A failed apply leaves the stack with no outputs, and a deleted stack leaves its vault behind:
+    # neither is a new environment, and its secrets stay.
+    param([object[]] $StackResources)
+    $fromStack = @($StackResources | Where-Object { $_ -and [string] $_['id'] -match '/providers/Microsoft\.KeyVault/vaults/([^/]+)$' } |
+            ForEach-Object { [string] ([regex]::Match([string] $_['id'], '/vaults/([^/]+)$').Groups[1].Value) })
+    if ($fromStack.Count -gt 0) { return $fromStack[0] }
+    $query = "[?tags.system=='$slug' && tags.environment=='$environmentName'].name"
+    for ($attempt = 1; $attempt -le 3; $attempt++) {
+        $PSNativeCommandUseErrorActionPreference = $false
+        $read = az keyvault list --resource-group $resourceGroup --query $query --output json 2>&1
+        $code = $LASTEXITCODE
+        $PSNativeCommandUseErrorActionPreference = $true
+        if ($code -eq 0) {
+            $names = @(("$read" | ConvertFrom-Json) | Where-Object { $_ })
+            if ($names.Count -gt 1) { Fail-Step "More than one vault in $resourceGroup carries the tags of ${environmentName}: $($names -join ', ')." }
+            return $names.Count -eq 1 ? [string] $names[0] : $null
+        }
+        if ($attempt -eq 3) { Fail-Step "Cannot list the vaults of ${resourceGroup}: $("$read" -replace '\s+', ' ')" }
+        Write-Host "Listing the vaults of $resourceGroup failed (attempt $attempt of 3); retrying in 30 seconds."
+        Start-Sleep -Seconds 30
+    }
+}
+
 function Get-StackOutput {
-    # Only a stack that does not exist means "first apply". Any other failure to read it is retried, then stops the
-    # step: an apply that wrongly takes the stack for new generates new SQL passwords (it happened in cmdemo1's prod).
+    # Only an environment without a vault means "first apply". A stack that does not exist or has no outputs (a failed
+    # apply) is looked up by its vault, and any other failure to read it is retried, then stops the step: an apply that
+    # wrongly takes the environment for new generates new SQL passwords and secrets (it happened in cmdemo1's prod, and
+    # in cmdemo1's tdd after a failed apply, issue #93).
     $errorFile = Join-Path ([IO.Path]::GetTempPath()) "stack-show-$([Guid]::NewGuid().ToString('N')).err"
     try {
         for ($attempt = 1; $attempt -le 3; $attempt++) {
@@ -92,11 +120,27 @@ function Get-StackOutput {
             $code = $LASTEXITCODE
             $PSNativeCommandUseErrorActionPreference = $true
             if ($code -eq 0) {
-                return ($json | ConvertFrom-Json -AsHashtable).outputs
+                $stack = $json | ConvertFrom-Json -AsHashtable
+                $stackOutputs = $stack['outputs']
+                if ($stackOutputs -and $stackOutputs.ContainsKey('keyVaultName')) {
+                    return $stackOutputs
+                }
+                $vault = Find-EnvironmentVault -StackResources @($stack['resources'])
+                if (-not $vault) {
+                    Write-Host "Stack $stackName is $($stack['provisioningState']) with no outputs, and $environmentName has no vault yet: a first apply."
+                    return $null
+                }
+                Write-Highlight "Stack $stackName is $($stack['provisioningState']) with no outputs: the secrets are read from its vault $vault."
+                $kept = if ($stackOutputs) { $stackOutputs } else { @{} }
+                $kept['keyVaultName'] = @{ value = $vault }
+                return $kept
             }
             $stderr = ((Get-Content -LiteralPath $errorFile -Raw -ErrorAction SilentlyContinue) ?? '').Trim()
             if ($stderr -match 'DeploymentStackNotFound|ResourceNotFound|could not be found|was not found') {
-                return $null
+                $vault = Find-EnvironmentVault -StackResources @()
+                if (-not $vault) { return $null }
+                Write-Highlight "Stack $stackName does not exist, but $environmentName's vault $vault does: the secrets are read from it."
+                return @{ keyVaultName = @{ value = $vault } }
             }
             if ($attempt -eq 3) {
                 Fail-Step "Cannot read ${stackName}: $stderr"
