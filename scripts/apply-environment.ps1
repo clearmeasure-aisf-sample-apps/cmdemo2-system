@@ -468,6 +468,13 @@ function Invoke-StackApply {
         [Parameter(Mandatory)] [string] $ParametersFile
     )
     $transient = 'DeploymentStackTenantRegistrationFailed|PrincipalNotFound|InvalidAuthenticationToken|ConflictingDatabaseOperation'
+    # system.denyExcludedActions: the control-plane actions a system lets anyone with a role on the resource call
+    # through the deny assignment (cmdemo1: starting and stopping its runner jobs, issue #94). The Azure CLI takes
+    # them as one space-separated value.
+    $excluded = @()
+    if ($system.system.ContainsKey('denyExcludedActions') -and @($system.system.denyExcludedActions).Count -gt 0) {
+        $excluded = @('--deny-settings-excluded-actions', (@($system.system.denyExcludedActions) -join ' '))
+    }
     $errorFile = Join-Path ([IO.Path]::GetTempPath()) "stack-$([Guid]::NewGuid().ToString('N')).err"
     try {
         for ($attempt = 1; $attempt -le 3; $attempt++) {
@@ -480,6 +487,7 @@ function Invoke-StackApply {
                 --action-on-unmanage deleteResources `
                 --deny-settings-mode denyWriteAndDelete `
                 --deny-settings-excluded-principals $deployPrincipalId `
+                @excluded `
                 --yes `
                 --output json 2>$errorFile
             $applied = $LASTEXITCODE -eq 0
