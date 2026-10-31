@@ -1,0 +1,794 @@
+{
+  "generated": "2026-10-31T14:40:55Z",
+  "environments": {
+    "tdd": {},
+    "uat": {},
+    "prod": {}
+  },
+  "resources": {
+    "nonprod": [
+      {
+        "type": "microsoft.alertsmanagement/smartDetectorAlertRules",
+        "name": "Failure Anomalies - appi-cmdemo2-tdd",
+        "environment": "",
+        "environments": [],
+        "location": "global",
+        "id": "/subscriptions/4a4dfa6d-d434-4b9e-8a88-63bbf61cfb69/resourceGroups/rg-cmdemo2-nonprod/providers/microsoft.alertsmanagement/smartDetectorAlertRules/Failure Anomalies - appi-cmdemo2-tdd",
+        "group": "rg-cmdemo2-nonprod",
+        "address": "",
+        "managedEnvironment": "",
+        "health": {
+          "status": "succeeded",
+          "source": "provisioningState",
+          "checkedAt": "2026-10-31T14:40:51Z"
+        }
+      },
+      {
+        "type": "microsoft.alertsmanagement/smartDetectorAlertRules",
+        "name": "Failure Anomalies - appi-cmdemo2-uat",
+        "environment": "",
+        "environments": [],
+        "location": "global",
+        "id": "/subscriptions/4a4dfa6d-d434-4b9e-8a88-63bbf61cfb69/resourceGroups/rg-cmdemo2-nonprod/providers/microsoft.alertsmanagement/smartDetectorAlertRules/Failure Anomalies - appi-cmdemo2-uat",
+        "group": "rg-cmdemo2-nonprod",
+        "address": "",
+        "managedEnvironment": "",
+        "health": {
+          "status": "succeeded",
+          "source": "provisioningState",
+          "checkedAt": "2026-10-31T14:40:51Z"
+        }
+      },
+      {
+        "type": "Microsoft.Insights/components",
+        "name": "appi-cmdemo2-tdd",
+        "environment": "tdd",
+        "environments": [
+          "tdd"
+        ],
+        "location": "westus3",
+        "id": "/subscriptions/4a4dfa6d-d434-4b9e-8a88-63bbf61cfb69/resourceGroups/rg-cmdemo2-nonprod/providers/Microsoft.Insights/components/appi-cmdemo2-tdd",
+        "group": "rg-cmdemo2-nonprod",
+        "address": "",
+        "managedEnvironment": "",
+        "health": {
+          "status": "succeeded",
+          "source": "provisioningState",
+          "checkedAt": "2026-10-31T14:40:51Z"
+        }
+      },
+      {
+        "type": "Microsoft.Insights/components",
+        "name": "appi-cmdemo2-uat",
+        "environment": "uat",
+        "environments": [
+          "uat"
+        ],
+        "location": "westus3",
+        "id": "/subscriptions/4a4dfa6d-d434-4b9e-8a88-63bbf61cfb69/resourceGroups/rg-cmdemo2-nonprod/providers/Microsoft.Insights/components/appi-cmdemo2-uat",
+        "group": "rg-cmdemo2-nonprod",
+        "address": "",
+        "managedEnvironment": "",
+        "health": {
+          "status": "succeeded",
+          "source": "provisioningState",
+          "checkedAt": "2026-10-31T14:40:51Z"
+        }
+      },
+      {
+        "type": "Microsoft.KeyVault/vaults",
+        "name": "kvcmdemo2tddptgq3",
+        "environment": "tdd",
+        "environments": [
+          "tdd"
+        ],
+        "location": "westus3",
+        "id": "/subscriptions/4a4dfa6d-d434-4b9e-8a88-63bbf61cfb69/resourceGroups/rg-cmdemo2-nonprod/providers/Microsoft.KeyVault/vaults/kvcmdemo2tddptgq3",
+        "group": "rg-cmdemo2-nonprod",
+        "address": "",
+        "managedEnvironment": "",
+        "health": {
+          "status": "available",
+          "source": "resourceHealth",
+          "checkedAt": "2026-10-31T14:40:51Z",
+          "summary": "There aren't any known Azure platform problems affecting this key vault."
+        }
+      },
+      {
+        "type": "Microsoft.KeyVault/vaults",
+        "name": "kvcmdemo2uatlbzty",
+        "environment": "uat",
+        "environments": [
+          "uat"
+        ],
+        "location": "westus3",
+        "id": "/subscriptions/4a4dfa6d-d434-4b9e-8a88-63bbf61cfb69/resourceGroups/rg-cmdemo2-nonprod/providers/Microsoft.KeyVault/vaults/kvcmdemo2uatlbzty",
+        "group": "rg-cmdemo2-nonprod",
+        "address": "",
+        "managedEnvironment": "",
+        "health": {
+          "status": "available",
+          "source": "resourceHealth",
+          "checkedAt": "2026-10-31T14:40:51Z",
+          "summary": "There aren't any known Azure platform problems affecting this key vault."
+        }
+      },
+      {
+        "type": "Microsoft.ManagedIdentity/userAssignedIdentities",
+        "name": "id-cmdemo2-deploy-nonprod",
+        "environment": "",
+        "environments": [],
+        "location": "westus3",
+        "id": "/subscriptions/4a4dfa6d-d434-4b9e-8a88-63bbf61cfb69/resourceGroups/rg-cmdemo2-nonprod/providers/Microsoft.ManagedIdentity/userAssignedIdentities/id-cmdemo2-deploy-nonprod",
+        "group": "rg-cmdemo2-nonprod",
+        "address": "",
+        "managedEnvironment": "",
+        "health": {
+          "status": "succeeded",
+          "source": "provisioningState",
+          "checkedAt": "2026-10-31T14:40:51Z"
+        }
+      },
+      {
+        "type": "Microsoft.ManagedIdentity/userAssignedIdentities",
+        "name": "id-cmdemo2-octopus-config",
+        "environment": "",
+        "environments": [],
+        "location": "westus3",
+        "id": "/subscriptions/4a4dfa6d-d434-4b9e-8a88-63bbf61cfb69/resourceGroups/rg-cmdemo2-nonprod/providers/Microsoft.ManagedIdentity/userAssignedIdentities/id-cmdemo2-octopus-config",
+        "group": "rg-cmdemo2-nonprod",
+        "address": "",
+        "managedEnvironment": "",
+        "health": {
+          "status": "succeeded",
+          "source": "provisioningState",
+          "checkedAt": "2026-10-31T14:40:51Z"
+        }
+      },
+      {
+        "type": "Microsoft.ManagedIdentity/userAssignedIdentities",
+        "name": "id-cmdemo2-plan",
+        "environment": "",
+        "environments": [],
+        "location": "westus3",
+        "id": "/subscriptions/4a4dfa6d-d434-4b9e-8a88-63bbf61cfb69/resourceGroups/rg-cmdemo2-nonprod/providers/Microsoft.ManagedIdentity/userAssignedIdentities/id-cmdemo2-plan",
+        "group": "rg-cmdemo2-nonprod",
+        "address": "",
+        "managedEnvironment": "",
+        "health": {
+          "status": "succeeded",
+          "source": "provisioningState",
+          "checkedAt": "2026-10-31T14:40:51Z"
+        }
+      },
+      {
+        "type": "Microsoft.ManagedIdentity/userAssignedIdentities",
+        "name": "id-cmdemo2-tdd-app",
+        "environment": "tdd",
+        "environments": [
+          "tdd"
+        ],
+        "location": "westus3",
+        "id": "/subscriptions/4a4dfa6d-d434-4b9e-8a88-63bbf61cfb69/resourceGroups/rg-cmdemo2-nonprod/providers/Microsoft.ManagedIdentity/userAssignedIdentities/id-cmdemo2-tdd-app",
+        "group": "rg-cmdemo2-nonprod",
+        "address": "",
+        "managedEnvironment": "",
+        "health": {
+          "status": "succeeded",
+          "source": "provisioningState",
+          "checkedAt": "2026-10-31T14:40:51Z"
+        }
+      },
+      {
+        "type": "Microsoft.ManagedIdentity/userAssignedIdentities",
+        "name": "id-cmdemo2-tdd-ui",
+        "environment": "tdd",
+        "environments": [
+          "tdd"
+        ],
+        "location": "westus3",
+        "id": "/subscriptions/4a4dfa6d-d434-4b9e-8a88-63bbf61cfb69/resourceGroups/rg-cmdemo2-nonprod/providers/Microsoft.ManagedIdentity/userAssignedIdentities/id-cmdemo2-tdd-ui",
+        "group": "rg-cmdemo2-nonprod",
+        "address": "",
+        "managedEnvironment": "",
+        "health": {
+          "status": "succeeded",
+          "source": "provisioningState",
+          "checkedAt": "2026-10-31T14:40:51Z"
+        }
+      },
+      {
+        "type": "Microsoft.ManagedIdentity/userAssignedIdentities",
+        "name": "id-cmdemo2-uat-app",
+        "environment": "uat",
+        "environments": [
+          "uat"
+        ],
+        "location": "westus3",
+        "id": "/subscriptions/4a4dfa6d-d434-4b9e-8a88-63bbf61cfb69/resourceGroups/rg-cmdemo2-nonprod/providers/Microsoft.ManagedIdentity/userAssignedIdentities/id-cmdemo2-uat-app",
+        "group": "rg-cmdemo2-nonprod",
+        "address": "",
+        "managedEnvironment": "",
+        "health": {
+          "status": "succeeded",
+          "source": "provisioningState",
+          "checkedAt": "2026-10-31T14:40:51Z"
+        }
+      },
+      {
+        "type": "Microsoft.ManagedIdentity/userAssignedIdentities",
+        "name": "id-cmdemo2-uat-ui",
+        "environment": "uat",
+        "environments": [
+          "uat"
+        ],
+        "location": "westus3",
+        "id": "/subscriptions/4a4dfa6d-d434-4b9e-8a88-63bbf61cfb69/resourceGroups/rg-cmdemo2-nonprod/providers/Microsoft.ManagedIdentity/userAssignedIdentities/id-cmdemo2-uat-ui",
+        "group": "rg-cmdemo2-nonprod",
+        "address": "",
+        "managedEnvironment": "",
+        "health": {
+          "status": "succeeded",
+          "source": "provisioningState",
+          "checkedAt": "2026-10-31T14:40:51Z"
+        }
+      },
+      {
+        "type": "Microsoft.OperationalInsights/workspaces",
+        "name": "log-cmdemo2-tdd",
+        "environment": "tdd",
+        "environments": [
+          "tdd"
+        ],
+        "location": "westus3",
+        "id": "/subscriptions/4a4dfa6d-d434-4b9e-8a88-63bbf61cfb69/resourceGroups/rg-cmdemo2-nonprod/providers/Microsoft.OperationalInsights/workspaces/log-cmdemo2-tdd",
+        "group": "rg-cmdemo2-nonprod",
+        "address": "",
+        "managedEnvironment": "",
+        "health": {
+          "status": "available",
+          "source": "resourceHealth",
+          "checkedAt": "2026-10-31T14:40:51Z",
+          "summary": "No workspace issues detected."
+        }
+      },
+      {
+        "type": "Microsoft.OperationalInsights/workspaces",
+        "name": "log-cmdemo2-uat",
+        "environment": "uat",
+        "environments": [
+          "uat"
+        ],
+        "location": "westus3",
+        "id": "/subscriptions/4a4dfa6d-d434-4b9e-8a88-63bbf61cfb69/resourceGroups/rg-cmdemo2-nonprod/providers/Microsoft.OperationalInsights/workspaces/log-cmdemo2-uat",
+        "group": "rg-cmdemo2-nonprod",
+        "address": "",
+        "managedEnvironment": "",
+        "health": {
+          "status": "available",
+          "source": "resourceHealth",
+          "checkedAt": "2026-10-31T14:40:51Z",
+          "summary": "No workspace issues detected."
+        }
+      },
+      {
+        "type": "Microsoft.Sql/servers",
+        "name": "sql-cmdemo2-tdd-7ihwh",
+        "environment": "tdd",
+        "environments": [
+          "tdd"
+        ],
+        "location": "centralus",
+        "id": "/subscriptions/4a4dfa6d-d434-4b9e-8a88-63bbf61cfb69/resourceGroups/rg-cmdemo2-nonprod/providers/Microsoft.Sql/servers/sql-cmdemo2-tdd-7ihwh",
+        "group": "rg-cmdemo2-nonprod",
+        "address": "",
+        "managedEnvironment": "",
+        "health": {
+          "status": "succeeded",
+          "source": "provisioningState",
+          "checkedAt": "2026-10-31T14:40:51Z"
+        }
+      },
+      {
+        "type": "Microsoft.Sql/servers",
+        "name": "sql-cmdemo2-uat-ew4mz",
+        "environment": "uat",
+        "environments": [
+          "uat"
+        ],
+        "location": "centralus",
+        "id": "/subscriptions/4a4dfa6d-d434-4b9e-8a88-63bbf61cfb69/resourceGroups/rg-cmdemo2-nonprod/providers/Microsoft.Sql/servers/sql-cmdemo2-uat-ew4mz",
+        "group": "rg-cmdemo2-nonprod",
+        "address": "",
+        "managedEnvironment": "",
+        "health": {
+          "status": "succeeded",
+          "source": "provisioningState",
+          "checkedAt": "2026-10-31T14:40:51Z"
+        }
+      },
+      {
+        "type": "Microsoft.Sql/servers/databases",
+        "name": "sql-cmdemo2-tdd-7ihwh/master",
+        "environment": "",
+        "environments": [],
+        "location": "centralus",
+        "id": "/subscriptions/4a4dfa6d-d434-4b9e-8a88-63bbf61cfb69/resourceGroups/rg-cmdemo2-nonprod/providers/Microsoft.Sql/servers/sql-cmdemo2-tdd-7ihwh/databases/master",
+        "group": "rg-cmdemo2-nonprod",
+        "address": "",
+        "managedEnvironment": "",
+        "health": {
+          "status": "succeeded",
+          "source": "provisioningState",
+          "checkedAt": "2026-10-31T14:40:51Z"
+        }
+      },
+      {
+        "type": "Microsoft.Sql/servers/databases",
+        "name": "sql-cmdemo2-tdd-7ihwh/sqldb-cmdemo2-tdd-2",
+        "environment": "tdd",
+        "environments": [
+          "tdd"
+        ],
+        "location": "centralus",
+        "id": "/subscriptions/4a4dfa6d-d434-4b9e-8a88-63bbf61cfb69/resourceGroups/rg-cmdemo2-nonprod/providers/Microsoft.Sql/servers/sql-cmdemo2-tdd-7ihwh/databases/sqldb-cmdemo2-tdd-2",
+        "group": "rg-cmdemo2-nonprod",
+        "address": "",
+        "managedEnvironment": "",
+        "health": {
+          "status": "available",
+          "source": "resourceHealth",
+          "checkedAt": "2026-10-31T14:40:51Z",
+          "summary": "There aren't any known Azure platform problems affecting this SQL database or SQL data warehouse."
+        }
+      },
+      {
+        "type": "Microsoft.Sql/servers/databases",
+        "name": "sql-cmdemo2-uat-ew4mz/master",
+        "environment": "",
+        "environments": [],
+        "location": "centralus",
+        "id": "/subscriptions/4a4dfa6d-d434-4b9e-8a88-63bbf61cfb69/resourceGroups/rg-cmdemo2-nonprod/providers/Microsoft.Sql/servers/sql-cmdemo2-uat-ew4mz/databases/master",
+        "group": "rg-cmdemo2-nonprod",
+        "address": "",
+        "managedEnvironment": "",
+        "health": {
+          "status": "succeeded",
+          "source": "provisioningState",
+          "checkedAt": "2026-10-31T14:40:51Z"
+        }
+      },
+      {
+        "type": "Microsoft.Sql/servers/databases",
+        "name": "sql-cmdemo2-uat-ew4mz/sqldb-cmdemo2-uat-2",
+        "environment": "uat",
+        "environments": [
+          "uat"
+        ],
+        "location": "centralus",
+        "id": "/subscriptions/4a4dfa6d-d434-4b9e-8a88-63bbf61cfb69/resourceGroups/rg-cmdemo2-nonprod/providers/Microsoft.Sql/servers/sql-cmdemo2-uat-ew4mz/databases/sqldb-cmdemo2-uat-2",
+        "group": "rg-cmdemo2-nonprod",
+        "address": "",
+        "managedEnvironment": "",
+        "health": {
+          "status": "available",
+          "source": "resourceHealth",
+          "checkedAt": "2026-10-31T14:40:51Z",
+          "summary": "There aren't any known Azure platform problems affecting this SQL database or SQL data warehouse."
+        }
+      },
+      {
+        "type": "Microsoft.Storage/storageAccounts",
+        "name": "stcmdemo2tf6hulrk",
+        "environment": "",
+        "environments": [],
+        "location": "westus3",
+        "id": "/subscriptions/4a4dfa6d-d434-4b9e-8a88-63bbf61cfb69/resourceGroups/rg-cmdemo2-nonprod/providers/Microsoft.Storage/storageAccounts/stcmdemo2tf6hulrk",
+        "group": "rg-cmdemo2-nonprod",
+        "address": "",
+        "managedEnvironment": "",
+        "health": {
+          "status": "available",
+          "source": "resourceHealth",
+          "checkedAt": "2026-10-31T14:40:51Z",
+          "summary": "There aren't any known Azure platform problems affecting this storage account."
+        }
+      },
+      {
+        "type": "Microsoft.Web/serverFarms",
+        "name": "asp-cmdemo2-tdd",
+        "environment": "tdd",
+        "environments": [
+          "tdd"
+        ],
+        "location": "westus3",
+        "id": "/subscriptions/4a4dfa6d-d434-4b9e-8a88-63bbf61cfb69/resourceGroups/rg-cmdemo2-nonprod/providers/Microsoft.Web/serverFarms/asp-cmdemo2-tdd",
+        "group": "rg-cmdemo2-nonprod",
+        "address": "",
+        "managedEnvironment": "",
+        "health": {
+          "status": "succeeded",
+          "source": "provisioningState",
+          "checkedAt": "2026-10-31T14:40:51Z"
+        }
+      },
+      {
+        "type": "Microsoft.Web/serverFarms",
+        "name": "asp-cmdemo2-uat-eastus2",
+        "environment": "uat",
+        "environments": [
+          "uat"
+        ],
+        "location": "eastus2",
+        "id": "/subscriptions/4a4dfa6d-d434-4b9e-8a88-63bbf61cfb69/resourceGroups/rg-cmdemo2-nonprod/providers/Microsoft.Web/serverFarms/asp-cmdemo2-uat-eastus2",
+        "group": "rg-cmdemo2-nonprod",
+        "address": "",
+        "managedEnvironment": "",
+        "health": {
+          "status": "succeeded",
+          "source": "provisioningState",
+          "checkedAt": "2026-10-31T14:40:51Z"
+        }
+      },
+      {
+        "type": "Microsoft.Web/sites",
+        "name": "app-cmdemo2-tdd-ui",
+        "environment": "tdd",
+        "environments": [
+          "tdd"
+        ],
+        "location": "westus3",
+        "id": "/subscriptions/4a4dfa6d-d434-4b9e-8a88-63bbf61cfb69/resourceGroups/rg-cmdemo2-nonprod/providers/Microsoft.Web/sites/app-cmdemo2-tdd-ui",
+        "group": "rg-cmdemo2-nonprod",
+        "address": "",
+        "managedEnvironment": "",
+        "health": {
+          "status": "succeeded",
+          "source": "provisioningState",
+          "checkedAt": "2026-10-31T14:40:51Z"
+        }
+      },
+      {
+        "type": "Microsoft.Web/sites",
+        "name": "app-cmdemo2-uat-ui",
+        "environment": "uat",
+        "environments": [
+          "uat"
+        ],
+        "location": "westus3",
+        "id": "/subscriptions/4a4dfa6d-d434-4b9e-8a88-63bbf61cfb69/resourceGroups/rg-cmdemo2-nonprod/providers/Microsoft.Web/sites/app-cmdemo2-uat-ui",
+        "group": "rg-cmdemo2-nonprod",
+        "address": "",
+        "managedEnvironment": "",
+        "health": {
+          "status": "succeeded",
+          "source": "provisioningState",
+          "checkedAt": "2026-10-31T14:40:51Z"
+        }
+      },
+      {
+        "type": "Microsoft.Web/sites",
+        "name": "app-cmdemo2-uat-ui-eastus2",
+        "environment": "uat",
+        "environments": [
+          "uat"
+        ],
+        "location": "eastus2",
+        "id": "/subscriptions/4a4dfa6d-d434-4b9e-8a88-63bbf61cfb69/resourceGroups/rg-cmdemo2-nonprod/providers/Microsoft.Web/sites/app-cmdemo2-uat-ui-eastus2",
+        "group": "rg-cmdemo2-nonprod",
+        "address": "",
+        "managedEnvironment": "",
+        "health": {
+          "status": "succeeded",
+          "source": "provisioningState",
+          "checkedAt": "2026-10-31T14:40:51Z"
+        }
+      },
+      {
+        "type": "Microsoft.Web/staticSites",
+        "name": "swa-cmdemo2-tdd-dashboard",
+        "environment": "tdd",
+        "environments": [
+          "tdd"
+        ],
+        "location": "centralus",
+        "id": "/subscriptions/4a4dfa6d-d434-4b9e-8a88-63bbf61cfb69/resourceGroups/rg-cmdemo2-nonprod/providers/Microsoft.Web/staticSites/swa-cmdemo2-tdd-dashboard",
+        "group": "rg-cmdemo2-nonprod",
+        "address": "",
+        "managedEnvironment": "",
+        "health": {
+          "status": "succeeded",
+          "source": "provisioningState",
+          "checkedAt": "2026-10-31T14:40:51Z"
+        }
+      },
+      {
+        "type": "Microsoft.Web/staticSites",
+        "name": "swa-cmdemo2-uat-dashboard",
+        "environment": "uat",
+        "environments": [
+          "uat"
+        ],
+        "location": "centralus",
+        "id": "/subscriptions/4a4dfa6d-d434-4b9e-8a88-63bbf61cfb69/resourceGroups/rg-cmdemo2-nonprod/providers/Microsoft.Web/staticSites/swa-cmdemo2-uat-dashboard",
+        "group": "rg-cmdemo2-nonprod",
+        "address": "",
+        "managedEnvironment": "",
+        "health": {
+          "status": "succeeded",
+          "source": "provisioningState",
+          "checkedAt": "2026-10-31T14:40:51Z"
+        }
+      }
+    ],
+    "prod": [
+      {
+        "type": "microsoft.alertsmanagement/smartDetectorAlertRules",
+        "name": "Failure Anomalies - appi-cmdemo2-prod",
+        "environment": "",
+        "environments": [],
+        "location": "global",
+        "id": "/subscriptions/4a4dfa6d-d434-4b9e-8a88-63bbf61cfb69/resourceGroups/rg-cmdemo2-prod/providers/microsoft.alertsmanagement/smartDetectorAlertRules/Failure Anomalies - appi-cmdemo2-prod",
+        "group": "rg-cmdemo2-prod",
+        "address": "",
+        "managedEnvironment": "",
+        "health": {
+          "status": "succeeded",
+          "source": "provisioningState",
+          "checkedAt": "2026-10-31T14:40:53Z"
+        }
+      },
+      {
+        "type": "Microsoft.Insights/components",
+        "name": "appi-cmdemo2-prod",
+        "environment": "prod",
+        "environments": [
+          "prod"
+        ],
+        "location": "westus3",
+        "id": "/subscriptions/4a4dfa6d-d434-4b9e-8a88-63bbf61cfb69/resourceGroups/rg-cmdemo2-prod/providers/Microsoft.Insights/components/appi-cmdemo2-prod",
+        "group": "rg-cmdemo2-prod",
+        "address": "",
+        "managedEnvironment": "",
+        "health": {
+          "status": "succeeded",
+          "source": "provisioningState",
+          "checkedAt": "2026-10-31T14:40:53Z"
+        }
+      },
+      {
+        "type": "Microsoft.KeyVault/vaults",
+        "name": "kvcmdemo2prodn3cwu",
+        "environment": "prod",
+        "environments": [
+          "prod"
+        ],
+        "location": "westus3",
+        "id": "/subscriptions/4a4dfa6d-d434-4b9e-8a88-63bbf61cfb69/resourceGroups/rg-cmdemo2-prod/providers/Microsoft.KeyVault/vaults/kvcmdemo2prodn3cwu",
+        "group": "rg-cmdemo2-prod",
+        "address": "",
+        "managedEnvironment": "",
+        "health": {
+          "status": "available",
+          "source": "resourceHealth",
+          "checkedAt": "2026-10-31T14:40:53Z",
+          "summary": "There aren't any known Azure platform problems affecting this key vault."
+        }
+      },
+      {
+        "type": "Microsoft.ManagedIdentity/userAssignedIdentities",
+        "name": "id-cmdemo2-deploy-prod",
+        "environment": "",
+        "environments": [],
+        "location": "westus3",
+        "id": "/subscriptions/4a4dfa6d-d434-4b9e-8a88-63bbf61cfb69/resourceGroups/rg-cmdemo2-prod/providers/Microsoft.ManagedIdentity/userAssignedIdentities/id-cmdemo2-deploy-prod",
+        "group": "rg-cmdemo2-prod",
+        "address": "",
+        "managedEnvironment": "",
+        "health": {
+          "status": "succeeded",
+          "source": "provisioningState",
+          "checkedAt": "2026-10-31T14:40:53Z"
+        }
+      },
+      {
+        "type": "Microsoft.ManagedIdentity/userAssignedIdentities",
+        "name": "id-cmdemo2-prod-app",
+        "environment": "prod",
+        "environments": [
+          "prod"
+        ],
+        "location": "westus3",
+        "id": "/subscriptions/4a4dfa6d-d434-4b9e-8a88-63bbf61cfb69/resourceGroups/rg-cmdemo2-prod/providers/Microsoft.ManagedIdentity/userAssignedIdentities/id-cmdemo2-prod-app",
+        "group": "rg-cmdemo2-prod",
+        "address": "",
+        "managedEnvironment": "",
+        "health": {
+          "status": "succeeded",
+          "source": "provisioningState",
+          "checkedAt": "2026-10-31T14:40:53Z"
+        }
+      },
+      {
+        "type": "Microsoft.ManagedIdentity/userAssignedIdentities",
+        "name": "id-cmdemo2-prod-ui",
+        "environment": "prod",
+        "environments": [
+          "prod"
+        ],
+        "location": "westus3",
+        "id": "/subscriptions/4a4dfa6d-d434-4b9e-8a88-63bbf61cfb69/resourceGroups/rg-cmdemo2-prod/providers/Microsoft.ManagedIdentity/userAssignedIdentities/id-cmdemo2-prod-ui",
+        "group": "rg-cmdemo2-prod",
+        "address": "",
+        "managedEnvironment": "",
+        "health": {
+          "status": "succeeded",
+          "source": "provisioningState",
+          "checkedAt": "2026-10-31T14:40:53Z"
+        }
+      },
+      {
+        "type": "Microsoft.OperationalInsights/workspaces",
+        "name": "log-cmdemo2-prod",
+        "environment": "prod",
+        "environments": [
+          "prod"
+        ],
+        "location": "westus3",
+        "id": "/subscriptions/4a4dfa6d-d434-4b9e-8a88-63bbf61cfb69/resourceGroups/rg-cmdemo2-prod/providers/Microsoft.OperationalInsights/workspaces/log-cmdemo2-prod",
+        "group": "rg-cmdemo2-prod",
+        "address": "",
+        "managedEnvironment": "",
+        "health": {
+          "status": "available",
+          "source": "resourceHealth",
+          "checkedAt": "2026-10-31T14:40:53Z",
+          "summary": "No workspace issues detected."
+        }
+      },
+      {
+        "type": "Microsoft.Sql/servers",
+        "name": "sql-cmdemo2-prod-njryb",
+        "environment": "prod",
+        "environments": [
+          "prod"
+        ],
+        "location": "centralus",
+        "id": "/subscriptions/4a4dfa6d-d434-4b9e-8a88-63bbf61cfb69/resourceGroups/rg-cmdemo2-prod/providers/Microsoft.Sql/servers/sql-cmdemo2-prod-njryb",
+        "group": "rg-cmdemo2-prod",
+        "address": "",
+        "managedEnvironment": "",
+        "health": {
+          "status": "succeeded",
+          "source": "provisioningState",
+          "checkedAt": "2026-10-31T14:40:53Z"
+        }
+      },
+      {
+        "type": "Microsoft.Sql/servers/databases",
+        "name": "sql-cmdemo2-prod-njryb/master",
+        "environment": "",
+        "environments": [],
+        "location": "centralus",
+        "id": "/subscriptions/4a4dfa6d-d434-4b9e-8a88-63bbf61cfb69/resourceGroups/rg-cmdemo2-prod/providers/Microsoft.Sql/servers/sql-cmdemo2-prod-njryb/databases/master",
+        "group": "rg-cmdemo2-prod",
+        "address": "",
+        "managedEnvironment": "",
+        "health": {
+          "status": "succeeded",
+          "source": "provisioningState",
+          "checkedAt": "2026-10-31T14:40:53Z"
+        }
+      },
+      {
+        "type": "Microsoft.Sql/servers/databases",
+        "name": "sql-cmdemo2-prod-njryb/sqldb-cmdemo2-prod-2",
+        "environment": "prod",
+        "environments": [
+          "prod"
+        ],
+        "location": "centralus",
+        "id": "/subscriptions/4a4dfa6d-d434-4b9e-8a88-63bbf61cfb69/resourceGroups/rg-cmdemo2-prod/providers/Microsoft.Sql/servers/sql-cmdemo2-prod-njryb/databases/sqldb-cmdemo2-prod-2",
+        "group": "rg-cmdemo2-prod",
+        "address": "",
+        "managedEnvironment": "",
+        "health": {
+          "status": "available",
+          "source": "resourceHealth",
+          "checkedAt": "2026-10-31T14:40:53Z",
+          "summary": "There aren't any known Azure platform problems affecting this SQL database or SQL data warehouse."
+        }
+      },
+      {
+        "type": "Microsoft.Web/serverFarms",
+        "name": "asp-cmdemo2-prod",
+        "environment": "prod",
+        "environments": [
+          "prod"
+        ],
+        "location": "westus3",
+        "id": "/subscriptions/4a4dfa6d-d434-4b9e-8a88-63bbf61cfb69/resourceGroups/rg-cmdemo2-prod/providers/Microsoft.Web/serverFarms/asp-cmdemo2-prod",
+        "group": "rg-cmdemo2-prod",
+        "address": "",
+        "managedEnvironment": "",
+        "health": {
+          "status": "succeeded",
+          "source": "provisioningState",
+          "checkedAt": "2026-10-31T14:40:53Z"
+        }
+      },
+      {
+        "type": "Microsoft.Web/serverFarms",
+        "name": "asp-cmdemo2-prod-eastus2",
+        "environment": "prod",
+        "environments": [
+          "prod"
+        ],
+        "location": "eastus2",
+        "id": "/subscriptions/4a4dfa6d-d434-4b9e-8a88-63bbf61cfb69/resourceGroups/rg-cmdemo2-prod/providers/Microsoft.Web/serverFarms/asp-cmdemo2-prod-eastus2",
+        "group": "rg-cmdemo2-prod",
+        "address": "",
+        "managedEnvironment": "",
+        "health": {
+          "status": "succeeded",
+          "source": "provisioningState",
+          "checkedAt": "2026-10-31T14:40:53Z"
+        }
+      },
+      {
+        "type": "Microsoft.Web/sites",
+        "name": "app-cmdemo2-prod-ui",
+        "environment": "prod",
+        "environments": [
+          "prod"
+        ],
+        "location": "westus3",
+        "id": "/subscriptions/4a4dfa6d-d434-4b9e-8a88-63bbf61cfb69/resourceGroups/rg-cmdemo2-prod/providers/Microsoft.Web/sites/app-cmdemo2-prod-ui",
+        "group": "rg-cmdemo2-prod",
+        "address": "",
+        "managedEnvironment": "",
+        "health": {
+          "status": "succeeded",
+          "source": "provisioningState",
+          "checkedAt": "2026-10-31T14:40:53Z"
+        }
+      },
+      {
+        "type": "Microsoft.Web/sites",
+        "name": "app-cmdemo2-prod-ui-eastus2",
+        "environment": "prod",
+        "environments": [
+          "prod"
+        ],
+        "location": "eastus2",
+        "id": "/subscriptions/4a4dfa6d-d434-4b9e-8a88-63bbf61cfb69/resourceGroups/rg-cmdemo2-prod/providers/Microsoft.Web/sites/app-cmdemo2-prod-ui-eastus2",
+        "group": "rg-cmdemo2-prod",
+        "address": "",
+        "managedEnvironment": "",
+        "health": {
+          "status": "succeeded",
+          "source": "provisioningState",
+          "checkedAt": "2026-10-31T14:40:53Z"
+        }
+      },
+      {
+        "type": "Microsoft.Web/staticSites",
+        "name": "swa-cmdemo2-prod-dashboard",
+        "environment": "prod",
+        "environments": [
+          "prod"
+        ],
+        "location": "centralus",
+        "id": "/subscriptions/4a4dfa6d-d434-4b9e-8a88-63bbf61cfb69/resourceGroups/rg-cmdemo2-prod/providers/Microsoft.Web/staticSites/swa-cmdemo2-prod-dashboard",
+        "group": "rg-cmdemo2-prod",
+        "address": "",
+        "managedEnvironment": "",
+        "health": {
+          "status": "succeeded",
+          "source": "provisioningState",
+          "checkedAt": "2026-10-31T14:40:53Z"
+        }
+      }
+    ]
+  }
+}

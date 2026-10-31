@@ -1,0 +1,226 @@
+{
+  "generated": "2026-10-31T14:40:30Z",
+  "environments": [
+    {
+      "name": "tdd",
+      "deployables": [
+        {
+          "name": "ui",
+          "version": "2.4.29",
+          "deployedAt": "2026-10-15T03:10:43Z",
+          "signedOffBy": null,
+          "reason": null,
+          "lastPersonSignOff": null,
+          "commit": "a9a4f6ca3486ff484bccab8871c48991f1079238",
+          "commitAt": "2026-10-15T02:43:54Z",
+          "leadTimeHours": 0.4,
+          "behindFirst": {
+            "versions": 0,
+            "days": 0
+          },
+          "deploymentsLast7Days": 0,
+          "failedLast7Days": 0,
+          "releaseUrl": "https://clearmeasure.octopus.app/app#/Spaces-356/projects/cmdemo2-ui/deployments/releases/2.4.29"
+        },
+        {
+          "name": "dashboard",
+          "version": "1.0.52",
+          "deployedAt": "2026-10-15T03:52:06Z",
+          "signedOffBy": null,
+          "reason": null,
+          "lastPersonSignOff": null,
+          "commit": "ed96568c1d59c3d6f68c3d7c1a08cb41b374eade",
+          "commitAt": "2026-10-15T03:46:08Z",
+          "leadTimeHours": 0.1,
+          "behindFirst": {
+            "versions": 0,
+            "days": 0
+          },
+          "deploymentsLast7Days": 0,
+          "failedLast7Days": 0,
+          "releaseUrl": "https://clearmeasure.octopus.app/app#/Spaces-356/projects/cmdemo2-dashboard/deployments/releases/1.0.52"
+        },
+        {
+          "name": "system",
+          "version": "1.0.63",
+          "deployedAt": "2026-10-16T02:57:10Z",
+          "signedOffBy": null,
+          "reason": null,
+          "lastPersonSignOff": null,
+          "commit": "c4825baa3050a14c1177b82d1bfd2574b9606cb8",
+          "commitAt": "2026-10-16T02:49:11Z",
+          "leadTimeHours": 0.1,
+          "behindFirst": {
+            "versions": 0,
+            "days": 0
+          },
+          "deploymentsLast7Days": 0,
+          "failedLast7Days": 0,
+          "releaseUrl": "https://clearmeasure.octopus.app/app#/Spaces-356/projects/cmdemo2-system/deployments/releases/1.0.63"
+        }
+      ],
+      "health": {
+        "last24Hours": {
+          "reports": 0,
+          "healthy": 0
+        },
+        "last7Days": {
+          "reports": 0,
+          "healthy": 0
+        },
+        "lastFailure": null
+      }
+    },
+    {
+      "name": "uat",
+      "deployables": [
+        {
+          "name": "ui",
+          "version": "2.4.29",
+          "deployedAt": "2026-10-15T03:25:07Z",
+          "signedOffBy": "ai-ops",
+          "reason": "Kit templates f85ad90: catching up with the fleet kit (cmdemo2-system 98: 6 template files differ); preview 0 changes in tdd, uat and prod",
+          "lastPersonSignOff": null,
+          "commit": "a9a4f6ca3486ff484bccab8871c48991f1079238",
+          "commitAt": "2026-10-15T02:43:54Z",
+          "leadTimeHours": 0.7,
+          "behindFirst": {
+            "versions": 0,
+            "days": 0
+          },
+          "deploymentsLast7Days": 0,
+          "failedLast7Days": 0,
+          "releaseUrl": "https://clearmeasure.octopus.app/app#/Spaces-356/projects/cmdemo2-ui/deployments/releases/2.4.29"
+        },
+        {
+          "name": "dashboard",
+          "version": "1.0.52",
+          "deployedAt": "2026-10-15T03:57:14Z",
+          "signedOffBy": "ai-ops",
+          "reason": "Kit templates f85ad90: catching up with the fleet kit (cmdemo2-system 98: 6 template files differ); preview 0 changes in tdd, uat and prod",
+          "lastPersonSignOff": null,
+          "commit": "ed96568c1d59c3d6f68c3d7c1a08cb41b374eade",
+          "commitAt": "2026-10-15T03:46:08Z",
+          "leadTimeHours": 0.2,
+          "behindFirst": {
+            "versions": 0,
+            "days": 0
+          },
+          "deploymentsLast7Days": 0,
+          "failedLast7Days": 0,
+          "releaseUrl": "https://clearmeasure.octopus.app/app#/Spaces-356/projects/cmdemo2-dashboard/deployments/releases/1.0.52"
+        },
+        {
+          "name": "system",
+          "version": "1.0.63",
+          "deployedAt": "2026-10-16T17:48:46Z",
+          "signedOffBy": "ai-ops",
+          "reason": "Jeffrey, 2026-10-15: hibernate the fleet except cmdemo1; cmdemo2 dormant (Front Door deleted, Free plans, new empty free-offer databases)",
+          "lastPersonSignOff": null,
+          "commit": "c4825baa3050a14c1177b82d1bfd2574b9606cb8",
+          "commitAt": "2026-10-16T02:49:11Z",
+          "leadTimeHours": 15.0,
+          "behindFirst": {
+            "versions": 0,
+            "days": 0
+          },
+          "deploymentsLast7Days": 0,
+          "failedLast7Days": 0,
+          "releaseUrl": "https://clearmeasure.octopus.app/app#/Spaces-356/projects/cmdemo2-system/deployments/releases/1.0.63"
+        }
+      ],
+      "health": {
+        "last24Hours": {
+          "reports": 0,
+          "healthy": 0
+        },
+        "last7Days": {
+          "reports": 0,
+          "healthy": 0
+        },
+        "lastFailure": null
+      }
+    },
+    {
+      "name": "prod",
+      "deployables": [
+        {
+          "name": "ui",
+          "version": "2.4.29",
+          "deployedAt": "2026-10-15T03:42:50Z",
+          "signedOffBy": "ai-ops",
+          "reason": "Kit templates f85ad90: catching up with the fleet kit (cmdemo2-system 98: 6 template files differ); preview 0 changes in tdd, uat and prod",
+          "lastPersonSignOff": null,
+          "commit": "a9a4f6ca3486ff484bccab8871c48991f1079238",
+          "commitAt": "2026-10-15T02:43:54Z",
+          "leadTimeHours": 1.0,
+          "behindFirst": {
+            "versions": 0,
+            "days": 0
+          },
+          "deploymentsLast7Days": 0,
+          "failedLast7Days": 0,
+          "releaseUrl": "https://clearmeasure.octopus.app/app#/Spaces-356/projects/cmdemo2-ui/deployments/releases/2.4.29"
+        },
+        {
+          "name": "dashboard",
+          "version": "1.0.52",
+          "deployedAt": "2026-10-15T04:02:26Z",
+          "signedOffBy": "ai-ops",
+          "reason": "Kit templates f85ad90: catching up with the fleet kit (cmdemo2-system 98: 6 template files differ); preview 0 changes in tdd, uat and prod",
+          "lastPersonSignOff": {
+            "version": "1.0.30",
+            "by": "jeffreypalermo",
+            "at": "2026-10-08T21:12:41Z",
+            "reason": null,
+            "releaseUrl": "https://clearmeasure.octopus.app/app#/Spaces-356/projects/cmdemo2-dashboard/deployments/releases/1.0.30"
+          },
+          "commit": "ed96568c1d59c3d6f68c3d7c1a08cb41b374eade",
+          "commitAt": "2026-10-15T03:46:08Z",
+          "leadTimeHours": 0.3,
+          "behindFirst": {
+            "versions": 0,
+            "days": 0
+          },
+          "deploymentsLast7Days": 0,
+          "failedLast7Days": 0,
+          "releaseUrl": "https://clearmeasure.octopus.app/app#/Spaces-356/projects/cmdemo2-dashboard/deployments/releases/1.0.52"
+        },
+        {
+          "name": "system",
+          "version": "1.0.57",
+          "deployedAt": "2026-10-14T17:48:59Z",
+          "signedOffBy": "ai-ops",
+          "reason": "Kit templates f85ad90: catching up with the fleet kit (cmdemo2-system 98: 6 template files differ); preview 0 changes in tdd, uat and prod",
+          "lastPersonSignOff": null,
+          "commit": "9de9a93e344ee21b411d7f3963e834aabec232e6",
+          "commitAt": "2026-10-14T17:02:54Z",
+          "leadTimeHours": 0.8,
+          "behindFirst": {
+            "versions": 6,
+            "days": 15.5
+          },
+          "deploymentsLast7Days": 0,
+          "failedLast7Days": 0,
+          "releaseUrl": "https://clearmeasure.octopus.app/app#/Spaces-356/projects/cmdemo2-system/deployments/releases/1.0.57"
+        }
+      ],
+      "health": {
+        "last24Hours": {
+          "reports": 0,
+          "healthy": 0
+        },
+        "last7Days": {
+          "reports": 0,
+          "healthy": 0
+        },
+        "lastFailure": null
+      }
+    }
+  ],
+  "failover": {
+    "environment": "uat",
+    "at": "2026-10-09T02:25:54Z",
+    "seconds": 62
+  }
+}
