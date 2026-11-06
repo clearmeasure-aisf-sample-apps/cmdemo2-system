@@ -43,6 +43,8 @@ $env:AZURE_CORE_DISABLE_PROGRESS_BAR = 'true'
 $Only = @($Only | ForEach-Object { $_ -split '[,\s]+' } | Where-Object { $_ })
 if (-not $ListChecks) {
     $system = Get-Content -LiteralPath (Join-Path $Root 'system.json') -Raw | ConvertFrom-Json -AsHashtable
+    # A retired deployable (deployables[].retired, decision 0058) is in no environment: nothing below sees it.
+    $system.deployables = @($system.deployables | Where-Object { $_['retired'] -ne $true })
     $slug = [string] $system.system.slug
     $org = [string] $system.system.githubOrg
     $systemRepo = "$org/$($system.system.repository)"
@@ -148,6 +150,37 @@ function Find-LastDeployment([string] $Slug, [string] $Environment) {
     if (-not $deployment) { return $null }
     $deployment | Add-Member -NotePropertyName Log -NotePropertyValue (Invoke-Octopus "/api/tasks/$($deployment.TaskId)/raw") -PassThru |
         Add-Member -NotePropertyName Version -NotePropertyValue (Invoke-Octopus "/api/$space/releases/$($deployment.ReleaseId)").Version -PassThru
+}
+function Get-SuccessfulVersion([string] $ProjectId, [string] $EnvironmentId, [int] $Days = 30) {
+    # The versions of the releases a project deployed successfully to an environment in the last $Days days, newest
+    # deployment first (the rollback check reads the order). A fixed count of deployments is no window: a factory that
+    # deploys to the first environment dozens of times a day pushes a rollback out of the last 30 within hours. The
+    # successful Deploy tasks of the project and environment come from the task list's own filters (GET /tasks:
+    # project, environment, states, fromCompletedDate; the instance's llms.txt), the deployments from the deployment
+    # list, which has no state or date filter and is read until it reaches the start of the window.
+    $since = [datetime]::UtcNow.AddDays(-$Days)
+    $succeeded = [Collections.Generic.HashSet[string]]::new()
+    for ($skip = 0; $skip -lt 5000; $skip += 100) {
+        $page = Invoke-Octopus "/api/$space/tasks?name=Deploy&project=$ProjectId&environment=$EnvironmentId&states=Success&fromCompletedDate=$([uri]::EscapeDataString($since.ToString('yyyy-MM-ddTHH:mm:ssZ')))&skip=$skip&take=100"
+        foreach ($task in @($page.Items)) {
+            $argument = $task.PSObject.Properties['Arguments']
+            if ($argument -and $argument.Value -and $argument.Value.PSObject.Properties['DeploymentId']) { $null = $succeeded.Add([string] $argument.Value.DeploymentId) }
+        }
+        if (@($page.Items).Count -lt 100) { break }
+    }
+    $releases = @{}
+    $versions = [Collections.Generic.List[version]]::new()
+    for ($skip = 0; $skip -lt 5000; $skip += 100) {
+        $page = Invoke-Octopus "/api/$space/deployments?projects=$ProjectId&environments=$EnvironmentId&skip=$skip&take=100"
+        $items = @($page.Items)
+        foreach ($deployment in $items) {
+            if (([datetime] $deployment.Created).ToUniversalTime() -lt $since -or -not $succeeded.Contains([string] $deployment.Id)) { continue }
+            if (-not $releases.ContainsKey($deployment.ReleaseId)) { $releases[$deployment.ReleaseId] = [version] (Invoke-Octopus "/api/$space/releases/$($deployment.ReleaseId)").Version }
+            $versions.Add($releases[$deployment.ReleaseId])
+        }
+        if ($items.Count -lt 100 -or ([datetime] $items[-1].Created).ToUniversalTime() -lt $since) { break }
+    }
+    return $versions.ToArray()
 }
 function Get-LastDeployment([string] $Slug, [string] $Environment) {
     $deployment = Find-LastDeployment $Slug $Environment
@@ -478,13 +511,12 @@ $checks = [ordered] @{
     'CAP-035' = { foreach ($f in 'update-deployable.ps1', 'verify-environment.ps1') { Assert-That ((Get-RepoFile $systemRepo "scripts/$f") -match 'Get-RevisionProblem') "$f does not fail fast" }; 'Update and Verify fail fast on a revision that cannot start' }
     'CAP-036' = { Assert-That (@(Get-ProcessStep $systemProject | Where-Object Name -eq 'Verify environment').Count -eq 1 -and @(Get-ProcessStep $deployableProject | Where-Object Name -eq 'Verify deployable').Count -eq 1) 'a verify step is missing'; 'both projects end with a verify step' }
     'CAP-037' = {
+        # The last 30 days of the environment's history, not a number of deployments (Get-SuccessfulVersion).
         $project = Get-Project $deployableProject
-        $versions = @((Invoke-Octopus "/api/$space/deployments?projects=$($project.Id)&environments=$(Get-EnvironmentId $first)&take=30").Items |
-                Where-Object { (Invoke-Octopus "/api/tasks/$($_.TaskId)").State -eq 'Success' } |
-                ForEach-Object { [version] (Invoke-Octopus "/api/$space/releases/$($_.ReleaseId)").Version })
-        if (@($versions | Select-Object -Unique).Count -lt 2) { Skip-Check "fewer than two releases deployed in $first" }
+        $versions = @(Get-SuccessfulVersion $project.Id (Get-EnvironmentId $first))
+        if (@($versions | Select-Object -Unique).Count -lt 2) { Skip-Check "fewer than two releases deployed in $first in the last 30 days" }
         $rolledBack = $false; for ($i = 0; $i -lt $versions.Count - 1; $i++) { if ($versions[$i] -lt $versions[$i + 1]) { $rolledBack = $true } }
-        Assert-That $rolledBack "no successful redeployment of an older release in $first"; "an older release was redeployed successfully in $first (test-rollback.ps1)"
+        Assert-That $rolledBack "no successful redeployment of an older release in $first in the last 30 days (test-rollback.ps1 proves it again)"; "an older release was redeployed successfully in $first in the last 30 days (test-rollback.ps1)"
     }
     'CAP-038' = {
         # The sign-off step is in the process from the start (it excludes the first environment), so a release made
@@ -652,22 +684,25 @@ $checks = [ordered] @{
         # Checked wherever the deployable has been deployed.
         $with = @($system.deployables | Where-Object { @($_['secrets'] | Where-Object { $_ }).Count -gt 0 })
         if ($with.Count -eq 0) { Skip-Check 'no deployable declares secrets yet' }
+        # (Under Set-StrictMode, indexing an empty list with 0 throws "Index was outside the bounds of the array" before the
+        # assertion below can say what is missing: Select-Object -First 1 gives $null.)
         $shown = foreach ($entry in $with) {
             $name = [string] $entry.name
             foreach ($e in $environments) {
                 if ($entry.ContainsKey('environments') -and @($entry.environments) -notcontains $e) { continue }
                 if (-not (Find-LastDeployment "$slug-$name" $e)) { continue }
-                $app = @(Get-ContainerApp $e | Where-Object { $_.deployable -eq $name })[0]
+                $app = Get-ContainerApp $e | Where-Object { $_.deployable -eq $name } | Select-Object -First 1
                 Assert-That ($null -ne $app) "stack-$slug-$e lists no container app for $name (a failed or unfinished apply?)"
-                $shared = @($system.azure.identities.apps | Where-Object { $_.environment -eq $e })[0]
+                $shared = $system.azure.identities.apps | Where-Object { $_.environment -eq $e } | Select-Object -First 1
+                Assert-That ($null -ne $shared) "system.json azure.identities.apps has no shared runtime identity for $e, the one that pulls the image of $($app.name)"
                 $held = @($app.properties.configuration['secrets'] | Where-Object { $_ })
                 $inline = @($held | Where-Object { -not $_['keyVaultUrl'] } | ForEach-Object { [string] $_.name })
                 Assert-That ($inline.Count -eq 0) "$($app.name) in $e holds $($inline -join ', ') as a stored value, not as a vault reference"
                 foreach ($secret in @($entry.secrets)) {
-                    $reference = @($held | Where-Object { $_.name -eq $secret.name })[0]
+                    $reference = $held | Where-Object { $_.name -eq $secret.name } | Select-Object -First 1
                     Assert-That ($null -ne $reference -and ([string] $reference['keyVaultUrl']).EndsWith("/secrets/$name-$($secret.name)") -and $reference['identity']) "$($app.name) in $e does not reference the vault secret $name-$($secret.name) for $($secret.name)"
                     Assert-That ([string] $reference.identity -like "*/userAssignedIdentities/id-$slug-$e-$name") "$($app.name) in $e reads $($secret.name) as $((([string] $reference.identity) -split '/')[-1]), not as its own identity id-$slug-$e-$name"
-                    $variable = @($app.properties.template.containers[0].env | Where-Object { $_.name -eq $secret.env })[0]
+                    $variable = $app.properties.template.containers[0].env | Where-Object { $_.name -eq $secret.env } | Select-Object -First 1
                     Assert-That ($null -ne $variable -and $variable['secretRef'] -eq $secret.name) "$($app.name) in $e does not get $($secret.env) from the secret $($secret.name)"
                 }
                 # The shared identity pulls the image; the app's code must not be able to use it, and it must not
