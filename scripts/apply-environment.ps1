@@ -282,6 +282,10 @@ if (-not (Test-Path -LiteralPath $template)) {
 $versions = Get-DesiredVersion
 $outputs = Get-StackOutput
 $system = Get-Content -LiteralPath (Join-Path $root 'system.json') -Raw | ConvertFrom-Json -AsHashtable
+# A retired deployable (deployables[].retired, decision 0058) is in no environment: nothing below sees it, but the
+# app it had here until this apply is still there when the apply starts, and its removal is the change, not downtime.
+$retiredDeployables = @($system.deployables | Where-Object { $_['retired'] -eq $true } | ForEach-Object { [string] $_.name })
+$system.deployables = @($system.deployables | Where-Object { $_['retired'] -ne $true })
 # deployables[].environments: a deployable may exist in some environments only; this one's are the rest of the work.
 $deployablesHere = @($system.deployables | Where-Object { -not $_.ContainsKey('environments') -or @($_.environments) -contains $environmentName })
 # The same rule as infra/main.bicep (hasDatabase): a container deployable uses the database unless it says
@@ -453,7 +457,11 @@ function Stop-AvailabilityProbe {
 # app it created, which the application's next deployment creates again, and that is the change, not downtime.
 $ownRuntime = @($system.deployables | Where-Object { $_['hosting'] -eq 'own' } | ForEach-Object { [string] $_.name })
 if ($ownRuntime.Count -gt 0) { Write-Host "Not watched here (they bring their own runtime): $($ownRuntime -join ', ')" }
-$probe = Start-AvailabilityProbe -Group $resourceGroup -Environment $environmentName -Outputs $outputs -Ignore $ownRuntime
+# A deployable that system.json no longer places in this environment (deployables[].environments, or retired) is
+# removed by this apply, and its app going away is the change, not downtime: it is not watched either.
+$notPlacedHere = @(@($system.deployables | Where-Object { $deployablesHere.name -notcontains $_.name } | ForEach-Object { [string] $_.name }) + $retiredDeployables)
+if ($notPlacedHere.Count -gt 0) { Write-Host "Not watched here (the apply removes them from $environmentName): $($notPlacedHere -join ', ')" }
+$probe = Start-AvailabilityProbe -Group $resourceGroup -Environment $environmentName -Outputs $outputs -Ignore @($ownRuntime + $notPlacedHere)
 function Invoke-StackApply {
     # Applies a template as a deployment stack with deny settings; returns the stack as JSON.
     # New role assignments and identities take a few minutes to propagate, and Azure sometimes reports
@@ -468,6 +476,13 @@ function Invoke-StackApply {
         [Parameter(Mandatory)] [string] $ParametersFile
     )
     $transient = 'DeploymentStackTenantRegistrationFailed|PrincipalNotFound|InvalidAuthenticationToken|ConflictingDatabaseOperation'
+    # system.denyExcludedActions: the control-plane actions a system lets anyone with a role on the resource call
+    # through the deny assignment (cmdemo1: starting and stopping its runner jobs, issue #94). The Azure CLI takes
+    # them as one space-separated value.
+    $excluded = @()
+    if ($system.system.ContainsKey('denyExcludedActions') -and @($system.system.denyExcludedActions).Count -gt 0) {
+        $excluded = @('--deny-settings-excluded-actions', (@($system.system.denyExcludedActions) -join ' '))
+    }
     $errorFile = Join-Path ([IO.Path]::GetTempPath()) "stack-$([Guid]::NewGuid().ToString('N')).err"
     try {
         for ($attempt = 1; $attempt -le 3; $attempt++) {
@@ -480,6 +495,7 @@ function Invoke-StackApply {
                 --action-on-unmanage deleteResources `
                 --deny-settings-mode denyWriteAndDelete `
                 --deny-settings-excluded-principals $deployPrincipalId `
+                @excluded `
                 --yes `
                 --output json 2>$errorFile
             $applied = $LASTEXITCODE -eq 0
