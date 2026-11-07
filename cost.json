@@ -1,0 +1,45 @@
+{
+  "generated": "2026-11-07T00:47:26Z",
+  "currency": "USD",
+  "asOf": "2026-11-06",
+  "system": {
+    "yesterday": 0.0,
+    "last7Days": 0.04,
+    "monthToDate": 0.03
+  },
+  "environments": [
+    {
+      "name": "tdd",
+      "yesterday": 0.0,
+      "last7Days": 0.03,
+      "monthToDate": 0.03,
+      "topServices": [
+        {
+          "name": "SQL Database",
+          "monthToDate": 0.03
+        }
+      ]
+    },
+    {
+      "name": "uat",
+      "yesterday": 0.0,
+      "last7Days": 0.01,
+      "monthToDate": 0.0,
+      "topServices": []
+    },
+    {
+      "name": "prod",
+      "yesterday": 0.0,
+      "last7Days": 0.0,
+      "monthToDate": 0.0,
+      "topServices": []
+    },
+    {
+      "name": "shared",
+      "yesterday": 0.0,
+      "last7Days": 0.0,
+      "monthToDate": 0.0,
+      "topServices": []
+    }
+  ]
+}
